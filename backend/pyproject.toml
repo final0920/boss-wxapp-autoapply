@@ -1,0 +1,40 @@
+[project]
+name = "boss-wxapp-autoapply-backend"
+version = "0.1.0"
+description = "PC 微信小程序版 BOSS直聘 半自动投递：截图+VLM+SendInput 非侵入控制 + 结构化筛选 + 投递看板"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "python-socketio>=5.12",
+    "sqlmodel>=0.0.22",
+    "pydantic-settings>=2.7",
+    "python-dotenv>=1.0",
+    "pillow>=11.0",
+    "httpx>=0.28",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-mock>=3.14",
+    "ruff>=0.9",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# anyio: only run asyncio backend (trio not installed)
+anyio_backends = ["asyncio"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
