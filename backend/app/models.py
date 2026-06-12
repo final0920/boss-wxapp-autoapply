@@ -165,4 +165,5 @@ class Quota(SQLModel, table=True):
     # 格式 YYYY-MM-DD
     date: str = Field(index=True, unique=True)
     apply_count: int = 0
+    vlm_count: int = 0          # 每日 VLM 调用次数（M5 熔断计数）
     updated_at: datetime = Field(default_factory=datetime.now)

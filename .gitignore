@@ -23,12 +23,16 @@ backend/data/
 node_modules/
 frontend/dist/
 frontend/.tanstack/
+*.tsbuildinfo
 
 # OS / IDE
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# OMC 运行时状态（不入库）
+.omc/
 
 # Scratch / probes（不入库）
 _g0_probe/

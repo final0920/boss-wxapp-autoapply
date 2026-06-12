@@ -7,9 +7,11 @@ UA，返回 403 "Your request was blocked."；裸 httpx POST 同请求正常 200
 接口与旧版一致：chat()/locate()/get_client()，screener 等调用方零改。
 新增 vision_json()：发送截图 + 指令，返回解析后的 JSON（视觉抽取用，低推理省时）。
 Authorization/key 不写入日志；临时错误（429/5xx）自动重试，其余快速失败。
+VLM 调用（locate/vision_json）在内部消耗每日预算；超额 raise VLMBudgetExceeded（M5）。
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -31,6 +33,10 @@ _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 class LLMError(Exception):
     """LLM 调用错误（非重试错误或重试耗尽）。"""
+
+
+class VLMBudgetExceeded(LLMError):
+    """每日 VLM 调用预算耗尽（熔断）。"""
 
 
 class LLMClient:
@@ -84,7 +90,11 @@ class LLMClient:
     # 视觉
     # ------------------------------------------------------------------
     def locate(self, image: Image, instruction: str) -> tuple[int, int]:
-        """截图 + 指令 → (x, y) 归一化 0-1000。"""
+        """截图 + 指令 → (x, y) 归一化 0-1000。
+
+        内部消耗每日 VLM 预算；超额 raise VLMBudgetExceeded。
+        """
+        _consume_vlm_budget()
         messages = [{"role": "user", "content": [
             {"type": "text", "text": instruction + '\n\n只输出 JSON：{"x": <0-1000>, "y": <0-1000>}'},
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_pil_to_b64(image)}"}},
@@ -92,7 +102,11 @@ class LLMClient:
         return _parse_coords(self.chat(messages, json_mode=True, reasoning=settings.vlm_reasoning))
 
     def vision_json(self, image: Image, instruction: str) -> Any:
-        """截图 + 指令 → 解析后的 JSON（视觉抽取，低推理）。"""
+        """截图 + 指令 → 解析后的 JSON（视觉抽取，低推理）。
+
+        内部消耗每日 VLM 预算；超额 raise VLMBudgetExceeded。
+        """
+        _consume_vlm_budget()
         messages = [{"role": "user", "content": [
             {"type": "text", "text": instruction},
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_pil_to_b64(image)}"}},
@@ -114,6 +128,34 @@ def get_client() -> LLMClient:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+def _consume_vlm_budget() -> None:
+    """同步消耗一次 VLM 配额；超额 raise VLMBudgetExceeded 并写 RunLog。
+
+    locate/vision_json 在线程池中执行，直接调同步核心，不走 asyncio。
+    """
+    from app.pipeline.rate_limiter import _sync_check_consume_vlm, _sync_get_vlm_quota
+    ok = _sync_check_consume_vlm(settings.vlm_daily_budget)
+    if not ok:
+        quota = _sync_get_vlm_quota(settings.vlm_daily_budget)
+        msg = (
+            f"VLM 每日预算已耗尽（今日已用 {quota['today_vlm_calls']}/"
+            f"{quota['vlm_daily_budget']} 次），熔断触发"
+        )
+        logger.warning(msg)
+        # 写 RunLog（异步上下文外：用同步 Session）
+        try:
+            from datetime import datetime
+            from sqlmodel import Session
+            from app.db import engine
+            from app.models import RunLog
+            with Session(engine) as session:
+                session.add(RunLog(event="vlm_budget", message=msg, level="WARNING"))
+                session.commit()
+        except Exception:  # noqa: BLE001
+            pass  # RunLog 写失败不阻断熔断逻辑
+        raise VLMBudgetExceeded(msg)
+
+
 def _pil_to_b64(image: Image) -> str:
     buf = BytesIO()
     image.save(buf, format="PNG")

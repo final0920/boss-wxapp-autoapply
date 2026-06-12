@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: oklch(0.9818 0.0054 95.0986);
+    --foreground: oklch(0.3438 0.0269 95.7226);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.3438 0.0269 95.7226);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.3438 0.0269 95.7226);
+    --primary: oklch(0.6171 0.1375 39.0427);
+    --primary-foreground: oklch(1 0 0);
+    --secondary: oklch(0.9245 0.0138 92.9892);
+    --secondary-foreground: oklch(0.4334 0.0177 98.6048);
+    --muted: oklch(0.9341 0.0153 90.239);
+    --muted-foreground: oklch(0.6059 0.0075 97.4233);
+    --accent: oklch(0.9245 0.0138 92.9892);
+    --accent-foreground: oklch(0.2671 0.0196 98.939);
+    --destructive: oklch(0.5771 0.2152 27.325);
+    --destructive-foreground: oklch(1 0 0);
+    --success: oklch(0.6 0.13 150);
+    --success-foreground: oklch(1 0 0);
+    --warning: oklch(0.78 0.16 75);
+    --warning-foreground: oklch(0.25 0.02 95);
+    --border: oklch(0.8847 0.0069 97.3627);
+    --input: oklch(0.7621 0.0156 98.3528);
+    --ring: oklch(0.6171 0.1375 39.0427);
+    --radius: 0.5rem;
+    --sidebar: oklch(0.9663 0.008 98.8792);
+    --sidebar-foreground: oklch(0.359 0.0051 106.6524);
+    --sidebar-primary: oklch(0.6171 0.1375 39.0427);
+    --sidebar-primary-foreground: oklch(1 0 0);
+    --sidebar-accent: oklch(0.9245 0.0138 92.9892);
+    --sidebar-accent-foreground: oklch(0.2671 0.0196 98.939);
+    --sidebar-border: oklch(0.8847 0.0069 97.3627);
+    --sidebar-ring: oklch(0.6171 0.1375 39.0427);
+    /* 品牌色（Claude/Aether 陶土橙 + 纸张色）*/
+    --book-cloth: #c96442;
+    --kraft: #e4b2a0;
+    --manilla: #f4e0d9;
+    --ivory-light: #faf9f5;
+    --ivory-medium: #e9e6dc;
+    /* 主色染色长投影 */
+    --shell-shadow: 0 25px 65px rgba(201, 100, 66, 0.18);
+    --shell-sidebar-shadow: 0 45px 95px rgba(61, 57, 41, 0.12);
+  }
+
+  .dark {
+    --background: oklch(0.2679 0.0036 106.6427);
+    --foreground: oklch(0.8074 0.0142 93.0137);
+    --card: oklch(0.3094 0.0039 106.6039);
+    --card-foreground: oklch(0.8074 0.0142 93.0137);
+    --popover: oklch(0.3094 0.0039 106.6039);
+    --popover-foreground: oklch(0.8074 0.0142 93.0137);
+    --primary: oklch(0.6724 0.1308 38.7559);
+    --primary-foreground: oklch(1 0 0);
+    --secondary: oklch(0.3613 0.0073 106.6308);
+    --secondary-foreground: oklch(0.8074 0.0142 93.0137);
+    --muted: oklch(0.3322 0.0049 106.6062);
+    --muted-foreground: oklch(0.716 0.0103 97.4189);
+    --accent: oklch(0.3613 0.0073 106.6308);
+    --accent-foreground: oklch(0.8074 0.0142 93.0137);
+    --destructive: oklch(0.6368 0.2078 25.3313);
+    --destructive-foreground: oklch(1 0 0);
+    --success: oklch(0.65 0.14 150);
+    --success-foreground: oklch(0.2 0.01 150);
+    --warning: oklch(0.82 0.16 75);
+    --warning-foreground: oklch(0.25 0.02 95);
+    --border: oklch(0.3618 0.0101 106.8928);
+    --input: oklch(0.4336 0.0113 100.2027);
+    --ring: oklch(0.6724 0.1308 38.7559);
+    --sidebar: oklch(0.2679 0.0036 106.6427);
+    --sidebar-foreground: oklch(0.8074 0.0142 93.0137);
+    --sidebar-primary: oklch(0.6724 0.1308 38.7559);
+    --sidebar-primary-foreground: oklch(1 0 0);
+    --sidebar-accent: oklch(0.3613 0.0073 106.6308);
+    --sidebar-accent-foreground: oklch(0.8074 0.0142 93.0137);
+    --sidebar-border: oklch(0.3618 0.0101 106.8928);
+    --sidebar-ring: oklch(0.6724 0.1308 38.7559);
+    --book-cloth: #d97757;
+    --ivory-light: #faf9f5;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased font-sans;
+    transition: background-color 0.35s ease, color 0.35s ease;
+  }
+  h1, h2, h3 {
+    @apply font-serif;
+  }
+}
+
+@layer components {
+  /* 轻玻璃拟态：壳层/浮层 */
+  .surface-glass {
+    @apply border rounded-3xl backdrop-blur-2xl;
+    background: rgba(250, 250, 247, 0.82);
+    border-color: rgba(145, 145, 141, 0.2);
+  }
+  .dark .surface-glass {
+    background: rgba(38, 38, 37, 0.78);
+    border-color: rgba(250, 250, 247, 0.14);
+  }
+  /* 侧栏卡片玻璃 */
+  .sidebar-card {
+    @apply rounded-2xl border p-3 backdrop-blur-xl;
+    background: rgba(250, 250, 247, 0.75);
+    border-color: rgba(145, 145, 141, 0.2);
+  }
+  .dark .sidebar-card {
+    background: rgba(38, 38, 37, 0.75);
+    border-color: rgba(250, 250, 247, 0.12);
+  }
+}

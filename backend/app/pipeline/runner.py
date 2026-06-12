@@ -297,7 +297,7 @@ class PipelineRunner:
 
                 # ---- 开详情 ----
                 ok = await asyncio.to_thread(
-                    driver._tap_until, card.cx, card.cy, "JobPager")
+                    driver._tap_until, card.cx, card.cy, "职位详情页")
                 if not ok:
                     self._fail_app(app_id, "未进详情页")
                     self.stats["failed"] += 1
@@ -310,7 +310,7 @@ class PipelineRunner:
                     continue
 
                 # ---- DUP 预检（扣配额/写 SENDING 之前；设备只上报 label）----
-                label = driver.read_chat_button_label(detail)
+                label = await asyncio.to_thread(driver.read_chat_button_label, detail)
                 if rules.dedup_contacted and "继续沟通" in label:
                     dispatcher.mark_dup(app_id)
                     self.stats["dup"] += 1
@@ -318,7 +318,7 @@ class PipelineRunner:
                     continue
 
                 # ---- 详情补全（详情覆盖列表）----
-                fields = driver.scrape_detail_fields(detail)
+                fields = await asyncio.to_thread(driver.scrape_detail_fields, detail)
                 job = self._enrich_job(app_id, fields) or job
 
                 # ---- 详情级 screen（硬过滤 + LLM 打分）----
