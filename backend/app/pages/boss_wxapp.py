@@ -1,27 +1,28 @@
-"""BOSS直聘 微信小程序驱动 —— 截图 + gpt-5.5 VLM 抽取/定位 + SendInput（非侵入）。
+"""BOSS直聘 微信小程序驱动 —— 截图 + 本地 OCR(RapidOCR) + SendInput（非侵入）。
 
-与 ms 的 `BossDriver` 实现同一套契约（runner/dispatcher/inbox_watcher 依赖），仅把
-"adb 控安卓真机"换成"桌面控小程序窗口"。决策权仍在 pipeline，本类只观测+执行。
+与 ms 的 BossDriver 同一套契约（runner/dispatcher/inbox_watcher 依赖）。感知层用
+本地 OCR（app/desktop/ocr.py）替代 gpt-5.5 视觉：每屏 ~1s、离线、免费、确定性强；
+文字带坐标 → 既识字又定位按钮/tab。决策权仍在 pipeline，本类只观测+执行。
 
-G0 已验证（见 .omc/plans/boss-wxapp-autoapply-plan.md §2.5）：窗口定位/截图/列表抽取/
-DPI 点击命中。实现进度：
-  M1 ✅ 窗口·截图·点击·列表抽取    M2 详情+投递    M3 巡检
-未实现方法显式 NotImplementedError 并标注里程碑，保证模块可导入、契约清晰。
+页面快照 dump() 返回 OCR 文本框列表（read_chat_button_label/scrape_detail_fields
+接收它）；需要点击的方法各自重新截图取坐标。点击目标用 OCR 文字框中心。
 """
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Optional
 
-from PIL.Image import Image
-
-from app.desktop import capture, input as desk_input, window
-from app.llm.client import get_client
+from app.desktop import capture, input as desk_input, ocr, window
+from app.desktop.ocr import TextBox
 from app.pipeline.collector import RawJob
 
 logger = logging.getLogger(__name__)
+
+_VERIFY_KW = ("验证码", "拖动", "滑块", "请完成", "安全验证", "向右滑", "点击验证", "拼图", "人机")
+_CHAT_KW = ("发送", "说点什么", "由你发起", "请输入", "换一换")
 
 
 @dataclass
@@ -32,27 +33,15 @@ class JobCard:
     cy: int
 
 
-_LIST_PROMPT = (
-    "这是 BOSS直聘 微信小程序的截图。判断页面类型并提取当前可见的所有职位卡片。"
-    "每张卡片输出 title(职位)、company(公司)、salary、area(地点,可空)、degree(学历,可空)、"
-    "experience(经验,可空)、company_scale(规模,可空)、finance_stage(融资,可空)、hr_name(可空)，"
-    "以及点击可进入该职位详情的目标坐标 cx、cy（归一化 0-1000，指向职位标题/薪资区，"
-    "勿指向技能标签或 HR 行）。严格只输出 JSON："
-    '{"page_type":"job_list|job_detail|chat|message_list|other",'
-    '"cards":[{"title":"","company":"","salary":"","area":"","degree":"","experience":"",'
-    '"company_scale":"","finance_stage":"","hr_name":"","cx":0,"cy":0}]}'
-)
-
-
 class BossWxappDriver:
-    """单个 BOSS小程序窗口上的操作。dump=截图，定位/读取走 VLM，动作走 SendInput。"""
+    """单个 BOSS小程序窗口上的操作。dump=OCR 文本框，定位/读取走 OCR，动作走 SendInput。"""
 
     def __init__(self, serial: str = "") -> None:
-        self.serial = serial  # 兼容 runner 签名；视觉路线无 serial 概念
+        self.serial = serial
         self._hwnd: Optional[int] = None
 
     # ------------------------------------------------------------------
-    # 窗口
+    # 窗口 / 快照
     # ------------------------------------------------------------------
     @property
     def hwnd(self) -> int:
@@ -61,57 +50,78 @@ class BossWxappDriver:
         return self._hwnd
 
     def prepare_device(self) -> None:
-        """定位并置顶 BOSS小程序窗口（锚点：职位列表页）。"""
+        """定位并置顶 BOSS小程序窗口。"""
         wi = window.find_miniprogram_window()
         if wi is None:
             raise RuntimeError("未找到 BOSS直聘 小程序窗口：请在微信中打开该小程序")
         self._hwnd = wi.hwnd
         window.foreground(wi.hwnd)
         time.sleep(0.6)
-        # TODO(M2): 校验并导航到职位 tab 列表页锚点
 
-    # ------------------------------------------------------------------
-    # 截图（dump 等价物）
-    # ------------------------------------------------------------------
-    def dump(self) -> Optional[Image]:
-        """当前窗口截图作为页面快照（VLM 在各方法内解析）。"""
+    def _snapshot(self) -> Optional[tuple[list[TextBox], int, int]]:
+        """截图 + OCR → (boxes, w, h)；失败返回 None。"""
         try:
-            return capture.capture_window(self.hwnd)
+            img = capture.capture_window(self.hwnd)
         except Exception as e:  # noqa: BLE001
-            logger.warning("dump 截图失败: %s", e)
+            logger.warning("截图失败: %s", e)
             return None
+        w, h = img.size
+        return ocr.ocr_boxes(img), w, h
+
+    def dump(self) -> Optional[list[TextBox]]:
+        """页面快照 = OCR 文本框列表。"""
+        snap = self._snapshot()
+        return snap[0] if snap else None
+
+    def _click_box(self, b: TextBox, w: int, h: int, settle: float = 1.2) -> None:
+        cx, cy = ocr.norm(b, w, h)
+        desk_input.click_norm(self.hwnd, cx, cy, settle_sec=settle)
 
     # ------------------------------------------------------------------
-    # 列表采集（M1 ✅）
+    # 页面判定
+    # ------------------------------------------------------------------
+    def _is_detail(self, boxes: list[TextBox]) -> bool:
+        return ocr.has(boxes, "职位详情") or ocr.has(boxes, "立即沟通", "继续沟通")
+
+    def _is_list(self, boxes: list[TextBox]) -> bool:
+        return len(ocr.salary_boxes(boxes)) >= 2 and ocr.has(boxes, "职位") and not self._is_detail(boxes)
+
+    def _is_new_jobs(self, boxes: list[TextBox]) -> bool:
+        return (ocr.has(boxes, "新职位") and ocr.has(boxes, "聊天", "消息")
+                and len(ocr.salary_boxes(boxes)) >= 1)
+
+    def _is_chat(self, boxes: list[TextBox]) -> bool:
+        if ocr.has(boxes, *_CHAT_KW):
+            return True
+        # 兜底：既不是详情/列表/新职位、也无底部主导航 → 视作会话页
+        return (not self._is_detail(boxes) and not self._is_list(boxes)
+                and not self._is_new_jobs(boxes) and not ocr.salary_boxes(boxes))
+
+    def _has_bottom_nav(self, boxes: list[TextBox], h: int) -> bool:
+        bottom = "".join(b.text for b in boxes if b.cy > h * 0.9)
+        return "职位" in bottom and "我的" in bottom and ("聊天" in bottom or "消息" in bottom)
+
+    def detect_verify(self) -> bool:
+        snap = self._snapshot()
+        return bool(snap and ocr.has(snap[0], *_VERIFY_KW))
+
+    # ------------------------------------------------------------------
+    # 列表采集
     # ------------------------------------------------------------------
     def scrape_page(self) -> list[JobCard]:
-        img = self.dump()
-        if img is None:
+        snap = self._snapshot()
+        if not snap:
             return []
-        try:
-            data = get_client().vision_json(img, _LIST_PROMPT)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("scrape_page VLM 失败: %s", e)
-            return []
+        boxes, w, h = snap
         cards: list[JobCard] = []
-        for c in data.get("cards", []):
-            title = (c.get("title") or "").strip()
-            company = (c.get("company") or "").strip()
-            if not title or not company:
+        for c in ocr.parse_job_cards(boxes, w, h):
+            if not c["title"] or not c["company"]:
                 continue
             cards.append(JobCard(
-                raw=RawJob(
-                    title=title, company=company,
-                    salary=(c.get("salary") or "").strip(),
-                    area=(c.get("area") or "").strip(),
-                    degree=(c.get("degree") or "").strip(),
-                    experience=(c.get("experience") or "").strip(),
-                    company_scale=(c.get("company_scale") or "").strip(),
-                    finance_stage=(c.get("finance_stage") or "").strip(),
-                    hr_name=(c.get("hr_name") or "").strip(),
-                ),
-                cx=int(c.get("cx", 500)), cy=int(c.get("cy", 500)),
-            ))
+                raw=RawJob(title=c["title"], company=c["company"], salary=c["salary"],
+                           area=c["area"], degree=c["degree"], experience=c["experience"],
+                           hr_name=c["hr_name"]),
+                cx=c["cx"], cy=c["cy"]))
         return cards
 
     def scroll_list(self) -> None:
@@ -119,387 +129,221 @@ class BossWxappDriver:
 
     def _tap_until(self, cx: int, cy: int, target_kw: str = "",
                    retries: int = 3, wait: float = 1.2) -> bool:
-        """点击归一化坐标，截图 VLM 校验是否到达 target_kw 指示页面；失败重试。"""
-        _verify_prompt = (
-            f"这是 BOSS直聘 微信小程序截图。判断当前页面是否已到达含关键词「{target_kw}」的目标页面。"
-            '严格只输出 JSON：{"reached": true}或{"reached": false}'
-        )
-        for attempt in range(retries):
+        """点击归一化坐标，OCR 校验是否到达目标页；失败重试。"""
+        for _ in range(retries):
             desk_input.click_norm(self.hwnd, cx, cy, settle_sec=wait)
             if not target_kw:
                 return True
-            img = self.dump()
-            if img is None:
+            snap = self._snapshot()
+            if not snap:
                 continue
-            try:
-                data = get_client().vision_json(img, _verify_prompt)
-                if data.get("reached"):
-                    return True
-            except Exception as e:  # noqa: BLE001
-                logger.warning("_tap_until VLM 校验失败(attempt %d): %s", attempt, e)
+            boxes = snap[0]
+            if "详情" in target_kw and self._is_detail(boxes):
+                return True
+            if ocr.has(boxes, target_kw):
+                return True
         return False
 
     # ------------------------------------------------------------------
-    # M2：验证码检测 / 页面保障
+    # 页面保障 / 返回（职位列表锚点）
     # ------------------------------------------------------------------
-
-    def detect_verify(self) -> bool:
-        """VLM 判断当前是否为验证码/风控页。"""
-        img = self.dump()
-        if img is None:
-            return False
-        _prompt = (
-            "这是 BOSS直聘 微信小程序截图。判断当前是否显示验证码、滑块、图片拼图、"
-            "风控提示或安全校验页面（任何需要手动操作才能继续的拦截页）。"
-            '严格只输出 JSON：{"is_verify": true}或{"is_verify": false}'
-        )
-        try:
-            data = get_client().vision_json(img, _prompt)
-            return bool(data.get("is_verify", False))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("detect_verify VLM 失败: %s", e)
-            return False
+    def ensure_on_list(self) -> bool:
+        snap = self._snapshot()
+        if snap and self._is_list(snap[0]):
+            return True
+        return self.back_to_list()
 
     def back_to_list(self, max_back: int = 5) -> bool:
-        """逐次点返回键直到 VLM 确认到达职位列表页；兜底重新导航到职位 tab。
-
-        VLM 判据：page_type == 'job_list'（复用 _LIST_PROMPT 结构）。
-        """
-        _list_check_prompt = (
-            "这是 BOSS直聘 微信小程序截图。只需判断当前是否为职位列表页"
-            "（显示多张职位卡片的滚动列表）。"
-            '严格只输出 JSON：{"page_type":"job_list"}或{"page_type":"other"}'
-        )
-
-        def _on_list() -> bool:
-            img = self.dump()
-            if img is None:
-                return False
-            try:
-                data = get_client().vision_json(img, _list_check_prompt)
-                return data.get("page_type") == "job_list"
-            except Exception as e:  # noqa: BLE001
-                logger.warning("back_to_list VLM 检查失败: %s", e)
-                return False
-
         for _ in range(max_back):
-            if _on_list():
+            snap = self._snapshot()
+            if snap and self._is_list(snap[0]):
                 return True
-            # 点左上角返回箭头（归一化坐标约 (50, 50)，小程序通用返回区）
-            desk_input.click_norm(self.hwnd, 50, 50, settle_sec=1.0)
-        if _on_list():
-            return True
-        # 兜底：尝试点底部"职位"tab 回锚点
-        logger.warning("back_to_list 返回键未能回到列表，兜底点职位 tab")
+            desk_input.click_norm(self.hwnd, 50, 50, settle_sec=1.0)  # 左上返回
         self.back_to_job_tab()
-        time.sleep(1.5)
-        return _on_list()
-
-    def ensure_on_list(self) -> bool:
-        """VLM 判断当前页，已在列表则直接返回 True，否则调 back_to_list 恢复。"""
-        _list_check_prompt = (
-            "这是 BOSS直聘 微信小程序截图。只需判断当前是否为职位列表页"
-            "（显示多张职位卡片的滚动列表）。"
-            '严格只输出 JSON：{"page_type":"job_list"}或{"page_type":"other"}'
-        )
-        img = self.dump()
-        if img is None:
-            return self.back_to_list()
-        try:
-            data = get_client().vision_json(img, _list_check_prompt)
-            if data.get("page_type") == "job_list":
-                return True
-        except Exception as e:  # noqa: BLE001
-            logger.warning("ensure_on_list VLM 失败: %s", e)
-        return self.back_to_list()
+        time.sleep(1.2)
+        snap = self._snapshot()
+        return bool(snap and self._is_list(snap[0]))
 
     # ------------------------------------------------------------------
     # 新职位 feed（聊天 tab → 新职位 子标签）导航
     # ------------------------------------------------------------------
-
-    def _on_new_jobs(self) -> bool:
-        """VLM 判断当前是否在『聊天→新职位』子标签 feed。"""
-        img = self.dump()
-        if img is None:
-            return False
-        _prompt = (
-            "这是 BOSS直聘 微信小程序截图。判断当前是否在『消息/聊天』页顶部的『新职位』子标签页"
-            "（顶部有 消息/看过我/新职位 标签且『新职位』高亮，下方是带红色 new 角标的职位卡列表）。"
-            '严格只输出 JSON：{"on_new_jobs": true}或{"on_new_jobs": false}'
-        )
-        try:
-            return bool(get_client().vision_json(img, _prompt).get("on_new_jobs"))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("_on_new_jobs VLM 失败: %s", e)
-            return False
-
-    def _has_bottom_nav(self) -> bool:
-        """VLM 判断底部是否有主导航栏（职位/聊天/我的）——用于避免在详情/聊天页误点。"""
-        img = self.dump()
-        if img is None:
-            return False
-        _prompt = (
-            "这是 BOSS直聘 微信小程序截图。判断底部是否存在主导航栏（含『职位』『聊天』『我的』等 tab）。"
-            "注意：职位详情页底部是『分享/收藏/立即沟通』按钮，不算主导航栏。"
-            '严格只输出 JSON：{"has_nav": true}或{"has_nav": false}'
-        )
-        try:
-            return bool(get_client().vision_json(img, _prompt).get("has_nav"))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("_has_bottom_nav VLM 失败: %s", e)
-            return False
+    def _snap_is_new_jobs(self) -> bool:
+        snap = self._snapshot()
+        return bool(snap and self._is_new_jobs(snap[0]))
 
     def goto_new_jobs(self) -> bool:
-        """导航到『聊天 tab → 新职位 子标签』。返回是否到位。
-
-        安全：先退出详情/聊天页到带底部主导航的页面，再点底部聊天 tab，
-        避免在详情页底部（立即沟通按钮区）误触投递。
-        """
-        # 0. 退到带主导航的页面（详情页底部是立即沟通，绝不能在那点底部坐标）
+        """导航到『聊天 tab → 新职位 子标签』。先退出详情/聊天页到带底部主导航的页面。"""
         for _ in range(4):
-            if self._has_bottom_nav():
+            snap = self._snapshot()
+            if snap and self._has_bottom_nav(snap[0], snap[2]):
                 break
-            desk_input.click_norm(self.hwnd, 50, 50, settle_sec=1.0)  # 左上返回箭头
+            desk_input.click_norm(self.hwnd, 50, 50, settle_sec=1.0)
 
         # 1. 点底部『聊天/消息』tab
-        img = self.dump()
-        cx, cy = 625, 965
-        if img is not None:
-            try:
-                loc = get_client().vision_json(
-                    img,
-                    '这是 BOSS直聘 小程序截图。定位底部主导航栏中『聊天』或『消息』tab 的中心坐标，归一化 0-1000。'
-                    '只输出 JSON：{"cx":625,"cy":965}',
-                )
-                cx, cy = int(loc.get("cx", cx)), int(loc.get("cy", cy))
-            except Exception as e:  # noqa: BLE001
-                logger.warning("goto_new_jobs 定位聊天 tab 失败: %s，用默认坐标", e)
-        desk_input.click_norm(self.hwnd, cx, cy, settle_sec=1.5)
+        snap = self._snapshot()
+        if snap:
+            boxes, w, h = snap
+            tab = next((b for b in boxes if b.cy > h * 0.9 and ("聊天" in b.text or "消息" in b.text)), None)
+            if tab:
+                self._click_box(tab, w, h, 1.5)
+            else:
+                desk_input.click_norm(self.hwnd, 625, 965, settle_sec=1.5)
 
         # 2. 点顶部『新职位』子标签
-        img = self.dump()
-        tcx, tcy = 430, 32
-        if img is not None:
-            try:
-                loc = get_client().vision_json(
-                    img,
-                    '这是 BOSS直聘 小程序聊天/消息页截图。定位顶部『新职位』标签的中心坐标，归一化 0-1000。'
-                    '只输出 JSON：{"found":true,"cx":430,"cy":32}',
-                )
-                if loc.get("found"):
-                    tcx, tcy = int(loc.get("cx", tcx)), int(loc.get("cy", tcy))
-            except Exception as e:  # noqa: BLE001
-                logger.warning("goto_new_jobs 定位新职位标签失败: %s，用默认坐标", e)
-        desk_input.click_norm(self.hwnd, tcx, tcy, settle_sec=1.5)
+        snap = self._snapshot()
+        if snap:
+            boxes, w, h = snap
+            nj = next((b for b in boxes if b.cy < h * 0.12 and "新职位" in b.text), None)
+            if nj:
+                self._click_box(nj, w, h, 1.5)
+            else:
+                desk_input.click_norm(self.hwnd, 430, 32, settle_sec=1.5)
 
-        return self._on_new_jobs()
+        # 确认（卡片渲染有延迟，重试几次）
+        for _ in range(3):
+            if self._snap_is_new_jobs():
+                return True
+            time.sleep(0.8)
+        return False
 
     def ensure_on_new_jobs(self) -> bool:
-        """确保停在新职位 feed；不在则导航过去。"""
-        if self._on_new_jobs():
+        if self._snap_is_new_jobs():
             return True
         return self.goto_new_jobs()
 
     # ------------------------------------------------------------------
-    # M2：详情页字段读取
+    # 详情页字段读取
     # ------------------------------------------------------------------
+    def read_chat_button_label(self, detail: list[TextBox]) -> str:
+        b = ocr.find_box(detail, "立即沟通", "继续沟通")
+        return b.text if b else ""
 
-    def read_chat_button_label(self, detail: Image) -> str:
-        """VLM 读详情页「立即沟通」或「继续沟通」按钮文案；未找到返回空串。"""
-        _prompt = (
-            "这是 BOSS直聘 微信小程序职位详情页截图。找到页面底部的沟通按钮，"
-            "读取其文案（通常是「立即沟通」或「继续沟通」）。"
-            '严格只输出 JSON：{"label":"立即沟通"}，若未找到则{"label":""}'
-        )
-        try:
-            data = get_client().vision_json(detail, _prompt)
-            return (data.get("label") or "").strip()
-        except Exception as e:  # noqa: BLE001
-            logger.warning("read_chat_button_label VLM 失败: %s", e)
-            return ""
+    def scrape_detail_fields(self, detail: list[TextBox]) -> dict[str, str]:
+        """从详情页 OCR 文本框抽取补全字段。"""
+        fields = {"location": "", "experience": "", "degree": "",
+                  "hr_name": "", "hr_title": "", "hr_active": "", "jd": ""}
+        for b in detail:
+            t = b.text
+            if not fields["location"] and ocr.looks_like_location(t):
+                fields["location"] = t
+            if not fields["experience"]:
+                exp = ocr.match_experience(t)
+                if exp:
+                    fields["experience"] = exp
+            if not fields["degree"] and ocr.is_degree(t):
+                fields["degree"] = t
+            if not fields["hr_active"] and ("活跃" in t or "回复" in t or "在线" in t):
+                fields["hr_active"] = t
+            if (not fields["hr_title"] and ocr.name_hint(t) and 2 < len(t) < 24
+                    and not ocr.looks_like_location(t)
+                    and not re.search(r"\d+\s*[-~]?\s*\d*\s*[Kk]", t)):
+                fields["hr_title"] = t
+        # JD：详情下半部、较长的文本拼接
+        jd_parts = [b.text for b in sorted(detail, key=lambda b: b.cy)
+                    if len(b.text) >= 8 and not ocr.looks_like_location(b.text)]
+        fields["jd"] = " ".join(jd_parts)[:1500]
+        if fields["hr_title"]:
+            fields["hr_name"] = fields["hr_title"].split("·")[0].split("•")[0].strip()
+        return fields
 
-    def scrape_detail_fields(self, detail: Image) -> dict[str, str]:
-        """VLM 从详情页截图抽取补全字段（location/experience/degree/hr_name/hr_title/hr_active/jd）。"""
-        _prompt = (
-            "这是 BOSS直聘 微信小程序职位详情页截图。提取以下字段："
-            "location(工作地点，如「武汉·洪山区·光谷」)、"
-            "experience(经验要求，如「1-3年」)、"
-            "degree(学历要求，如「本科」)、"
-            "hr_name(HR姓名，如「刘女士」)、"
-            "hr_title(HR职务，如「公司 • 人事专员」)、"
-            "hr_active(HR活跃状态，如「17分钟前回复」)、"
-            "jd(职位描述全文，尽量完整)。"
-            "严格只输出 JSON："
-            '{"location":"","experience":"","degree":"","hr_name":"","hr_title":"","hr_active":"","jd":""}'
-        )
-        empty: dict[str, str] = {
-            "location": "", "experience": "", "degree": "",
-            "hr_name": "", "hr_title": "", "hr_active": "", "jd": "",
-        }
-        try:
-            data = get_client().vision_json(detail, _prompt)
-            return {k: (data.get(k) or "").strip() for k in empty}
-        except Exception as e:  # noqa: BLE001
-            logger.warning("scrape_detail_fields VLM 失败: %s", e)
-            return empty
+    # ------------------------------------------------------------------
+    # 投递动作
+    # ------------------------------------------------------------------
+    def _grab_greeting(self, boxes: list[TextBox]) -> str:
+        """会话页抓实发招呼语（best-effort：最长的一段非 UI 文本）。"""
+        cand = [b.text for b in boxes
+                if len(b.text) >= 6 and not ocr.name_hint(b.text)
+                and not any(k in b.text for k in _CHAT_KW)]
+        return max(cand, key=len) if cand else ""
 
     def tap_chat_and_capture(self) -> tuple[bool, str, str]:
-        """VLM 定位「立即沟通」→ click_norm → VLM 确认进会话页 → VLM 抓实发招呼语。
-
-        返回 (ok, greeting, fail_reason)。前置：当前停在目标岗位详情页。
-        """
-        img = self.dump()
-        if img is None:
+        """OCR 定位「立即沟通」→ 点击 → 确认进会话页 → 抓招呼语。返回 (ok, greeting, reason)。"""
+        snap = self._snapshot()
+        if not snap:
             return False, "", "详情页截图失败"
-
-        # 定位沟通按钮坐标
-        _locate_prompt = (
-            "这是 BOSS直聘 微信小程序职位详情页截图。定位页面底部「立即沟通」或「继续沟通」按钮的中心坐标。"
-            "坐标归一化到 0-1000（0=左/上，1000=右/下）。"
-            '严格只输出 JSON：{"found":true,"cx":500,"cy":900}，若未找到则{"found":false,"cx":0,"cy":0}'
-        )
-        try:
-            loc = get_client().vision_json(img, _locate_prompt)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("tap_chat_and_capture 定位失败: %s", e)
-            return False, "", f"VLM 定位按钮失败: {e}"
-
-        if not loc.get("found"):
+        boxes, w, h = snap
+        btn = ocr.find_box(boxes, "立即沟通", "继续沟通")
+        if btn is None:
             return False, "", "未找到沟通按钮"
 
-        cx, cy = int(loc.get("cx", 500)), int(loc.get("cy", 900))
-
-        # 点击并等待页面变化
-        _chat_check_prompt = (
-            "这是 BOSS直聘 微信小程序截图。判断当前是否已进入与 HR 的聊天会话页面"
-            "（页面顶部显示 HR 名字，页面中有消息气泡，底部有输入框）。"
-            '严格只输出 JSON：{"in_chat":true}或{"in_chat":false}'
-        )
-        entered = False
-        for attempt in range(4):
-            desk_input.click_norm(self.hwnd, cx, cy, settle_sec=1.2)
-            after = self.dump()
-            if after is None:
+        for _ in range(4):
+            self._click_box(btn, w, h, 1.3)
+            snap2 = self._snapshot()
+            if not snap2:
                 continue
-            try:
-                chk = get_client().vision_json(after, _chat_check_prompt)
-                if chk.get("in_chat"):
-                    entered = True
-                    break
-            except Exception as e:  # noqa: BLE001
-                logger.warning("tap_chat_and_capture 会话确认失败(attempt %d): %s", attempt, e)
+            b2, w, h = snap2
+            if self._is_chat(b2):
+                return True, self._grab_greeting(b2), ""
+            nxt = ocr.find_box(b2, "立即沟通", "继续沟通")
+            if nxt is None:
+                break  # 已离开详情页但未判定为会话——再确认一次
+            btn = nxt
 
-        if not entered:
-            return False, "", "未跳转聊天页"
-
-        # 抓实发招呼语
-        chat_img = self.dump()
-        greeting = ""
-        if chat_img is not None:
-            _greeting_prompt = (
-                "这是 BOSS直聘 微信小程序聊天会话页截图。找到页面中最后一条由「我」发出的消息气泡文本，"
-                "即招呼语（通常是第一条消息）。"
-                '严格只输出 JSON：{"greeting":"<消息内容>"}，若未找到则{"greeting":""}'
-            )
-            try:
-                g = get_client().vision_json(chat_img, _greeting_prompt)
-                greeting = (g.get("greeting") or "").strip()
-            except Exception as e:  # noqa: BLE001
-                logger.warning("tap_chat_and_capture 抓招呼语失败: %s", e)
-
-        return True, greeting, ""
+        snap3 = self._snapshot()
+        if snap3 and self._is_chat(snap3[0]):
+            return True, self._grab_greeting(snap3[0]), ""
+        return False, "", "未跳转聊天页"
 
     # ------------------------------------------------------------------
-    # M3：消息 tab 与会话列表
+    # 消息 tab 与会话列表
     # ------------------------------------------------------------------
-
     def open_message_tab(self) -> bool:
-        """VLM 定位底部「消息/聊天」tab → click_norm → VLM 确认到达消息列表页。"""
-        img = self.dump()
-        if img is None:
-            return False
-
-        _locate_prompt = (
-            "这是 BOSS直聘 微信小程序截图。定位页面底部导航栏中「消息」或「聊天」tab 的中心坐标。"
-            "坐标归一化到 0-1000。"
-            '严格只输出 JSON：{"found":true,"cx":750,"cy":980}，若未找到则{"found":false,"cx":750,"cy":980}'
-        )
-        try:
-            loc = get_client().vision_json(img, _locate_prompt)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("open_message_tab 定位失败: %s，用默认坐标", e)
-            loc = {"found": False, "cx": 750, "cy": 980}
-
-        cx, cy = int(loc.get("cx", 750)), int(loc.get("cy", 980))
-        desk_input.click_norm(self.hwnd, cx, cy, settle_sec=1.5)
-
-        # VLM 确认到位：消息列表页特征（会话列表，顶部搜索框）
-        after = self.dump()
-        if after is None:
-            return False
-        _check_prompt = (
-            "这是 BOSS直聘 微信小程序截图。判断当前是否已到达消息/聊天列表页"
-            "（页面显示与 HR 的会话列表，顶部有搜索框）。"
-            '严格只输出 JSON：{"on_message":true}或{"on_message":false}'
-        )
-        try:
-            chk = get_client().vision_json(after, _check_prompt)
-            return bool(chk.get("on_message", False))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("open_message_tab 确认失败: %s", e)
-            return False
+        snap = self._snapshot()
+        if snap:
+            boxes, w, h = snap
+            tab = next((b for b in boxes if b.cy > h * 0.9 and ("聊天" in b.text or "消息" in b.text)), None)
+            if tab:
+                self._click_box(tab, w, h, 1.5)
+            else:
+                desk_input.click_norm(self.hwnd, 625, 965, settle_sec=1.5)
+        snap2 = self._snapshot()
+        return bool(snap2 and ocr.has(snap2[0], "全部", "新招呼", "仅沟通", "消息"))
 
     def scrape_conversations(self) -> list[dict[str, str]]:
-        """VLM 解析当前消息列表页的会话列表。
+        """OCR 解析消息列表页的会话行（best-effort 行分组）。
 
-        返回 [{hr_name, position, last_msg, time, status, unread}]。
-        position 形如「公司 | 岗位」；系统通知项（无 position）已过滤。
+        每条会话：头像 | 名字(左) + 时间(右上) | 公司|岗位 + 最后消息。
+        以"名字行右侧的时间"为行锚，按 y 分组。系统通知（无公司|岗位结构）过滤。
         """
-        img = self.dump()
-        if img is None:
+        snap = self._snapshot()
+        if not snap:
             return []
-        _prompt = (
-            "这是 BOSS直聘 微信小程序消息列表页截图。提取所有与 HR 的会话条目。"
-            "每条会话输出：hr_name(HR姓名)、position(格式「公司 | 岗位」)、"
-            "last_msg(最后一条消息摘要)、time(消息时间，如「13:01」或「昨天」)、"
-            "status(消息状态标签，如「[新招呼]」或「[送达]」，无则空)、"
-            "unread(未读数字字符串，无则空)。"
-            "过滤掉系统通知、官方公告等非真实 HR 会话（这类条目通常没有 position 字段）。"
-            '严格只输出 JSON：{"conversations":[{"hr_name":"","position":"","last_msg":"","time":"","status":"","unread":""}]}'
-        )
-        try:
-            data = get_client().vision_json(img, _prompt)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("scrape_conversations VLM 失败: %s", e)
-            return []
+        boxes, w, h = snap
+        # 时间锚：形如 13:01 / 昨天 / 星期X / N天前
+        time_re = re.compile(r"^\d{1,2}:\d{2}$|昨天|前天|星期|周[一二三四五六日]|\d+天前|刚刚")
+        anchors = sorted([b for b in boxes if b.cx > w * 0.7 and time_re.search(b.text)],
+                         key=lambda b: b.cy)
         convs: list[dict[str, str]] = []
-        for c in data.get("conversations", []):
-            position = (c.get("position") or "").strip()
+        for i, a in enumerate(anchors):
+            top = a.cy - 28
+            bot = anchors[i + 1].cy - 28 if i + 1 < len(anchors) else h + 1
+            row = [b for b in boxes if top <= b.cy < bot and b.cx < w * 0.72]
+            row.sort(key=lambda b: (b.cy, b.cx))
+            if not row:
+                continue
+            name = row[0].text
+            rest = [b.text for b in row[1:]]
+            position = next((t for t in rest if ("|" in t or "｜" in t)), "")
+            others = [t for t in rest if t != position]
+            last_msg = max(others, key=len) if others else ""
+            status = ""
+            for mark in ("[新招呼]", "[送达]", "新招呼", "送达"):
+                if any(mark in t for t in rest):
+                    status = mark.strip("[]")
+                    break
+            unread = next((t for t in rest if t.isdigit()), "")
             if not position:
-                continue  # 过滤系统通知
-            convs.append({
-                "hr_name": (c.get("hr_name") or "").strip(),
-                "position": position,
-                "last_msg": (c.get("last_msg") or "").strip(),
-                "time": (c.get("time") or "").strip(),
-                "status": (c.get("status") or "").strip(),
-                "unread": (c.get("unread") or "").strip(),
-            })
+                continue  # 过滤系统通知/官方
+            convs.append({"hr_name": name, "position": position, "last_msg": last_msg,
+                          "time": a.text, "status": status, "unread": unread})
         return convs
 
     def back_to_job_tab(self) -> None:
-        """VLM 定位底部「职位」tab → click_norm，回到职位列表锚点。"""
-        img = self.dump()
-        _locate_prompt = (
-            "这是 BOSS直聘 微信小程序截图。定位页面底部导航栏中「职位」tab 的中心坐标。"
-            "坐标归一化到 0-1000。"
-            '严格只输出 JSON：{"found":true,"cx":125,"cy":980}，若未找到则{"found":false,"cx":125,"cy":980}'
-        )
-        cx, cy = 125, 980  # 默认兜底坐标
-        if img is not None:
-            try:
-                loc = get_client().vision_json(img, _locate_prompt)
-                cx, cy = int(loc.get("cx", cx)), int(loc.get("cy", cy))
-            except Exception as e:  # noqa: BLE001
-                logger.warning("back_to_job_tab 定位失败: %s，用默认坐标", e)
-        desk_input.click_norm(self.hwnd, cx, cy, settle_sec=1.5)
+        snap = self._snapshot()
+        if snap:
+            boxes, w, h = snap
+            tab = next((b for b in boxes if b.cy > h * 0.9 and "职位" in b.text and "详情" not in b.text), None)
+            if tab:
+                self._click_box(tab, w, h, 1.5)
+                return
+        desk_input.click_norm(self.hwnd, 125, 980, settle_sec=1.5)
