@@ -214,6 +214,93 @@ class BossWxappDriver:
         return self.back_to_list()
 
     # ------------------------------------------------------------------
+    # 新职位 feed（聊天 tab → 新职位 子标签）导航
+    # ------------------------------------------------------------------
+
+    def _on_new_jobs(self) -> bool:
+        """VLM 判断当前是否在『聊天→新职位』子标签 feed。"""
+        img = self.dump()
+        if img is None:
+            return False
+        _prompt = (
+            "这是 BOSS直聘 微信小程序截图。判断当前是否在『消息/聊天』页顶部的『新职位』子标签页"
+            "（顶部有 消息/看过我/新职位 标签且『新职位』高亮，下方是带红色 new 角标的职位卡列表）。"
+            '严格只输出 JSON：{"on_new_jobs": true}或{"on_new_jobs": false}'
+        )
+        try:
+            return bool(get_client().vision_json(img, _prompt).get("on_new_jobs"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("_on_new_jobs VLM 失败: %s", e)
+            return False
+
+    def _has_bottom_nav(self) -> bool:
+        """VLM 判断底部是否有主导航栏（职位/聊天/我的）——用于避免在详情/聊天页误点。"""
+        img = self.dump()
+        if img is None:
+            return False
+        _prompt = (
+            "这是 BOSS直聘 微信小程序截图。判断底部是否存在主导航栏（含『职位』『聊天』『我的』等 tab）。"
+            "注意：职位详情页底部是『分享/收藏/立即沟通』按钮，不算主导航栏。"
+            '严格只输出 JSON：{"has_nav": true}或{"has_nav": false}'
+        )
+        try:
+            return bool(get_client().vision_json(img, _prompt).get("has_nav"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("_has_bottom_nav VLM 失败: %s", e)
+            return False
+
+    def goto_new_jobs(self) -> bool:
+        """导航到『聊天 tab → 新职位 子标签』。返回是否到位。
+
+        安全：先退出详情/聊天页到带底部主导航的页面，再点底部聊天 tab，
+        避免在详情页底部（立即沟通按钮区）误触投递。
+        """
+        # 0. 退到带主导航的页面（详情页底部是立即沟通，绝不能在那点底部坐标）
+        for _ in range(4):
+            if self._has_bottom_nav():
+                break
+            desk_input.click_norm(self.hwnd, 50, 50, settle_sec=1.0)  # 左上返回箭头
+
+        # 1. 点底部『聊天/消息』tab
+        img = self.dump()
+        cx, cy = 625, 965
+        if img is not None:
+            try:
+                loc = get_client().vision_json(
+                    img,
+                    '这是 BOSS直聘 小程序截图。定位底部主导航栏中『聊天』或『消息』tab 的中心坐标，归一化 0-1000。'
+                    '只输出 JSON：{"cx":625,"cy":965}',
+                )
+                cx, cy = int(loc.get("cx", cx)), int(loc.get("cy", cy))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("goto_new_jobs 定位聊天 tab 失败: %s，用默认坐标", e)
+        desk_input.click_norm(self.hwnd, cx, cy, settle_sec=1.5)
+
+        # 2. 点顶部『新职位』子标签
+        img = self.dump()
+        tcx, tcy = 430, 32
+        if img is not None:
+            try:
+                loc = get_client().vision_json(
+                    img,
+                    '这是 BOSS直聘 小程序聊天/消息页截图。定位顶部『新职位』标签的中心坐标，归一化 0-1000。'
+                    '只输出 JSON：{"found":true,"cx":430,"cy":32}',
+                )
+                if loc.get("found"):
+                    tcx, tcy = int(loc.get("cx", tcx)), int(loc.get("cy", tcy))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("goto_new_jobs 定位新职位标签失败: %s，用默认坐标", e)
+        desk_input.click_norm(self.hwnd, tcx, tcy, settle_sec=1.5)
+
+        return self._on_new_jobs()
+
+    def ensure_on_new_jobs(self) -> bool:
+        """确保停在新职位 feed；不在则导航过去。"""
+        if self._on_new_jobs():
+            return True
+        return self.goto_new_jobs()
+
+    # ------------------------------------------------------------------
     # M2：详情页字段读取
     # ------------------------------------------------------------------
 

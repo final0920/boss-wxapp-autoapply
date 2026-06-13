@@ -91,6 +91,7 @@ class PipelineRunner:
         self.stats = {"collected": 0, "prefilter_fail": 0, "screened": 0,
                       "applied": 0, "dup": 0, "failed": 0, "inbox_new": 0}
         self._llm_fail_streak = 0
+        self._source = "new_jobs"  # 采集源：新职位优先 → 喂尽切 job_list
         self._task = asyncio.create_task(self._run(), name="pipeline-runner")
         return True
 
@@ -205,6 +206,23 @@ class PipelineRunner:
         return result
 
     # ------------------------------------------------------------------
+    # 采集源锚点（新职位优先 → 职位列表 fallback）
+    # ------------------------------------------------------------------
+
+    async def _ensure_anchor(self, driver) -> bool:
+        """确保停在当前采集源锚点页。"""
+        if self._source == "new_jobs":
+            return await asyncio.to_thread(driver.ensure_on_new_jobs)
+        return await asyncio.to_thread(driver.ensure_on_list)
+
+    async def _back_to_anchor(self, driver) -> None:
+        """投递/失败后回到当前采集源锚点页。"""
+        if self._source == "new_jobs":
+            await asyncio.to_thread(driver.goto_new_jobs)
+        else:
+            await asyncio.to_thread(driver.back_to_list)
+
+    # ------------------------------------------------------------------
     # 主循环
     # ------------------------------------------------------------------
 
@@ -254,9 +272,9 @@ class PipelineRunner:
                     self._pause_geetest()
                     return
 
-                # ---- 锚点自愈：确保在列表页（上轮若卡在聊天/详情/弹窗，这里拉回）----
-                if not await asyncio.to_thread(driver.ensure_on_list):
-                    _runlog("runner_anchor", "未能回到列表页，跳过本轮重试", level="WARNING")
+                # ---- 锚点自愈：确保在当前采集源锚点页（新职位/职位列表）----
+                if not await self._ensure_anchor(driver):
+                    _runlog("runner_anchor", "未能回到采集源锚点，跳过本轮重试", level="WARNING")
                     await self._sleep(5)
                     continue
 
@@ -268,12 +286,19 @@ class PipelineRunner:
                     await asyncio.to_thread(driver.scroll_list)
                     scroll_misses += 1
                     if scroll_misses >= SCROLL_MISS_LIMIT:
-                        # 列表喂尽：歇一轮巡检 + 长间隔再试
-                        n = await asyncio.to_thread(inbox_watcher.poll_once, driver)
-                        self.stats["inbox_new"] += n
-                        last_inbox_ts = _time.monotonic()
                         scroll_misses = 0
-                        await self._sleep(60)
+                        if self._source == "new_jobs":
+                            # 新职位 feed 喂尽 → 切到职位列表
+                            self._source = "job_list"
+                            _runlog("source_switch", "新职位 feed 已投尽，切换到职位列表")
+                        else:
+                            # 职位列表也喂尽：巡检 + 长歇，再回到新职位优先
+                            n = await asyncio.to_thread(inbox_watcher.poll_once, driver)
+                            self.stats["inbox_new"] += n
+                            last_inbox_ts = _time.monotonic()
+                            await self._sleep(60)
+                            self._source = "new_jobs"
+                            _runlog("source_switch", "职位列表喂尽，回到新职位优先")
                     continue
                 scroll_misses = 0
 
@@ -304,7 +329,7 @@ class PipelineRunner:
                     continue
                 detail = await asyncio.to_thread(driver.dump)
                 if detail is None:
-                    await asyncio.to_thread(driver.back_to_list)
+                    await self._back_to_anchor(driver)
                     self._fail_app(app_id, "详情页 dump 失败")
                     self.stats["failed"] += 1
                     continue
@@ -314,7 +339,7 @@ class PipelineRunner:
                 if rules.dedup_contacted and "继续沟通" in label:
                     dispatcher.mark_dup(app_id)
                     self.stats["dup"] += 1
-                    await asyncio.to_thread(driver.back_to_list)
+                    await self._back_to_anchor(driver)
                     continue
 
                 # ---- 详情补全（详情覆盖列表）----
@@ -329,7 +354,7 @@ class PipelineRunner:
                 if getattr(result, "llm_unavailable", False):
                     self._llm_fail_streak += 1
                     _runlog("screen_fail", f"淘汰 {label}：{result.fail_reason}", app_id, "WARNING")
-                    await asyncio.to_thread(driver.back_to_list)
+                    await self._back_to_anchor(driver)
                     if self._llm_fail_streak >= 3:
                         self._running = False
                         self.state = "STOPPED"
@@ -343,7 +368,7 @@ class PipelineRunner:
                 self._llm_fail_streak = 0
                 if result.final != "CLAIMED":
                     _runlog("screen_fail", f"淘汰 {label}：{result.fail_reason}", app_id)
-                    await asyncio.to_thread(driver.back_to_list)
+                    await self._back_to_anchor(driver)
                     continue
                 _runlog("screen_pass",
                         f"通过 {label}：{'未打分' if result.score < 0 else str(int(result.score)) + '分'}",
@@ -355,7 +380,7 @@ class PipelineRunner:
                     self.stats["applied"] += 1
                 elif outcome == "FAILED":
                     self.stats["failed"] += 1
-                await asyncio.to_thread(driver.back_to_list)
+                await self._back_to_anchor(driver)
 
                 # ---- geetest 检测（投后）----
                 if await asyncio.to_thread(driver.detect_verify):
