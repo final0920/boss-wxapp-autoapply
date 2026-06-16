@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import ValidationError
 from sqlmodel import Session, select
 
-from app.config import settings
 from app.db import get_db
 from app.models import Config
 from app.rules import RulesConfig, load_rules, save_rules
@@ -20,20 +19,6 @@ router = APIRouter(prefix="/config", tags=["config"])
 async def list_config(db: Session = Depends(get_db)) -> list[dict]:
     items = db.exec(select(Config)).all()
     return [{"key": c.key, "value": c.value, "updated_at": c.updated_at.isoformat()} for c in items]
-
-
-@router.get("/model-info", dependencies=[Depends(require_auth)])
-async def get_model_info() -> dict:
-    """模型只读信息（model/base_url/reasoning），供设置页展示。
-
-    不含 API Key —— Key 仅后端持有，从 .env 注入。
-    注意：此路由必须注册在 /{key} 之前，否则 'model-info' 会被当作 key 匹配。
-    """
-    return {
-        "model": settings.gpt_model,
-        "base_url": settings.gpt_base_url,
-        "reasoning": settings.gpt_reasoning,
-    }
 
 
 @router.get("/rules", dependencies=[Depends(require_auth)])

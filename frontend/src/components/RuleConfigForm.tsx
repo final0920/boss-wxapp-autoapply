@@ -37,11 +37,6 @@ export function RuleConfigForm({ config, loading, onChange }: RuleConfigFormProp
     onChange('company_scales', next)
   }
 
-  const textAreaCls =
-    'w-full rounded-xl border border-border/60 bg-muted/50 px-4 py-2 text-sm ' +
-    'placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 ' +
-    'focus-visible:ring-primary/40 focus-visible:border-primary/60 transition-all resize-y disabled:opacity-50'
-
   return (
     <div className="space-y-4 max-w-2xl">
 
@@ -227,70 +222,7 @@ export function RuleConfigForm({ config, loading, onChange }: RuleConfigFormProp
         </CardContent>
       </Card>
 
-      {/* ⑤ LLM */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t.rules.groupLlm}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {/* LLM 打分开关 */}
-          <label className="flex items-center justify-between gap-3 cursor-pointer">
-            <span className="text-sm text-foreground">启用 LLM 打分</span>
-            <input
-              type="checkbox"
-              checked={config.llm_enabled}
-              disabled={loading}
-              onChange={e => onChange('llm_enabled', e.target.checked)}
-              className="h-4 w-4 accent-primary"
-            />
-          </label>
-          <p className="text-xs text-muted-foreground -mt-1.5">
-            关闭后：硬过滤通过的岗位直接投递，不调用 LLM（适合 LLM 不可用、或想纯按硬条件投递）。
-          </p>
-          <div className={`space-y-1 ${config.llm_enabled ? '' : 'opacity-40 pointer-events-none'}`}>
-            <label className="text-xs text-muted-foreground">
-              {t.rules.llmThreshold}
-              <span className="ml-2 font-mono text-primary">{config.llm_threshold}</span>
-            </label>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={config.llm_threshold}
-              disabled={loading || !config.llm_enabled}
-              onChange={e => onChange('llm_threshold', Number(e.target.value))}
-              className="w-full accent-primary disabled:opacity-50"
-            />
-            <p className="text-xs text-muted-foreground">
-              评分 &ge; {config.llm_threshold} 才会自动投递
-            </p>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">{t.rules.profile}</label>
-            <textarea
-              value={config.profile}
-              onChange={e => onChange('profile', e.target.value)}
-              rows={4}
-              disabled={loading}
-              className={textAreaCls}
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">{t.rules.greetingPrompt}</label>
-            <textarea
-              value={config.greeting_prompt}
-              onChange={e => onChange('greeting_prompt', e.target.value)}
-              rows={3}
-              disabled={true}
-              placeholder={t.rules.greetingPromptHint}
-              className={textAreaCls}
-            />
-            <p className="text-xs text-muted-foreground">{t.rules.greetingPromptHint}</p>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ⑥ 投递节奏 */}
+      {/* ⑤ 投递节奏 */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">{t.rules.groupPace}</CardTitle>

@@ -106,7 +106,6 @@ export function ApplicationTable({ apps }: { apps: ApplicationRecord[] }) {
             <th className="px-4 py-2.5 font-semibold">岗位</th>
             <th className="px-4 py-2.5 font-semibold">薪资</th>
             <th className="px-4 py-2.5 font-semibold">城市/地点</th>
-            <th className="px-4 py-2.5 font-semibold">评分</th>
             <th className="px-4 py-2.5 font-semibold">状态</th>
             <th className="px-4 py-2.5 font-semibold">时间</th>
           </tr>
@@ -145,11 +144,6 @@ function Row({ app, expanded, onToggle }: {
         <td className="px-4 py-2.5 max-w-[220px] truncate">{job?.title ?? '—'}</td>
         <td className="px-4 py-2.5 whitespace-nowrap">{job?.salary || '—'}</td>
         <td className="px-4 py-2.5 max-w-[140px] truncate text-muted-foreground">{job?.area || '—'}</td>
-        <td className="px-4 py-2.5">
-          {job?.score != null
-            ? <span className={cn('font-semibold', job.score >= 80 ? 'text-success' : 'text-muted-foreground')}>{job.score}</span>
-            : <span className="text-muted-foreground/60">—</span>}
-        </td>
         <td className="px-4 py-2.5"><StatusBadge status={app.status} /></td>
         <td className="px-4 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
           {fmtTime(app.sent_at ?? app.updated_at)}
@@ -157,7 +151,7 @@ function Row({ app, expanded, onToggle }: {
       </tr>
       {expanded && (
         <tr className="border-t border-border/30">
-          <td colSpan={7} className="p-0"><ExpandedDetail app={app} /></td>
+          <td colSpan={6} className="p-0"><ExpandedDetail app={app} /></td>
         </tr>
       )}
     </>

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ApplicationTable, PendingConfirmQueue } from '../components/ApplicationBoard'
 import { Button, Card, CardContent, Input } from '../components/ui'
 import { cn } from '../lib/utils'
-import { getApplications, confirmApplication, clearHistory } from '../api'
+import { getAllApplications, confirmApplication, clearHistory } from '../api'
 import type { ApplicationRecord } from '../api'
 
 const FILTERS: { key: string; label: string }[] = [
@@ -15,15 +15,18 @@ const FILTERS: { key: string; label: string }[] = [
   { key: 'PENDING', label: '待筛选' },
 ]
 
+const PAGE_SIZE = 50
+
 function ApplicationsPage() {
   const [apps, setApps] = useState<ApplicationRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
   const [keyword, setKeyword] = useState('')
+  const [page, setPage] = useState(1)
 
   const refresh = useCallback(() => {
-    getApplications()
+    getAllApplications()
       .then(data => { setApps(data); setError(null) })
       .catch(() => setError('加载投递记录失败，请确认后端已启动'))
       .finally(() => setLoading(false))
@@ -62,6 +65,14 @@ function ApplicationsPage() {
     for (const a of apps) c[a.status] = (c[a.status] ?? 0) + 1
     return c
   }, [apps])
+
+  // 筛选/搜索变化时回到第 1 页
+  useEffect(() => { setPage(1) }, [statusFilter, keyword])
+
+  const total = filtered.length
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const curPage = Math.min(page, totalPages)
+  const pageItems = filtered.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE)
 
   const onClear = async () => {
     if (!window.confirm('确定清空全部投递历史？\n（岗位 / 投递记录 / HR消息 / 日志 / 今日配额计数将被删除，规则配置保留）')) return
@@ -128,7 +139,23 @@ function ApplicationsPage() {
             </div>
           </div>
 
-          <ApplicationTable apps={filtered} />
+          <ApplicationTable apps={pageItems} />
+
+          {total > 0 && (
+            <div className="flex items-center justify-between text-sm text-muted-foreground">
+              <span>共 {total} 条{total > PAGE_SIZE ? ` · 第 ${curPage} / ${totalPages} 页` : ''}</span>
+              {totalPages > 1 && (
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" disabled={curPage <= 1} onClick={() => setPage(curPage - 1)}>
+                    上一页
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={curPage >= totalPages} onClick={() => setPage(curPage + 1)}>
+                    下一页
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

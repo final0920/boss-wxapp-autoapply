@@ -90,7 +90,6 @@ class PipelineRunner:
         self.started_at = datetime.now().isoformat(timespec="seconds")
         self.stats = {"collected": 0, "prefilter_fail": 0, "screened": 0,
                       "applied": 0, "dup": 0, "failed": 0, "inbox_new": 0}
-        self._llm_fail_streak = 0
         self._source = "job_list"  # 采集源：职位列表（推荐）
         self._task = asyncio.create_task(self._run(), name="pipeline-runner")
         return True
@@ -198,7 +197,7 @@ class PipelineRunner:
 
     @staticmethod
     def _screen_and_persist(app_id: int, job: Job, rules: RulesConfig):
-        """screen（含 LLM，阻塞）+ 落库。在线程池中执行。"""
+        """screen（纯硬过滤，阻塞）+ 落库。在线程池中执行。"""
         result = screen(job, rules)
         with Session(engine) as session:
             apply_screen_result(session, app_id, result)
@@ -348,33 +347,16 @@ class PipelineRunner:
                 fields = await asyncio.to_thread(driver.scrape_detail_fields, detail)
                 job = self._enrich_job(app_id, fields) or job
 
-                # ---- 详情级 screen（硬过滤 + LLM 打分）----
+                # ---- 详情级 screen（纯硬过滤）----
                 result = await asyncio.to_thread(
                     self._screen_and_persist, app_id, job, rules)
                 self.stats["screened"] += 1
                 label = f"{job.company}｜{job.title}"
-                if getattr(result, "llm_unavailable", False):
-                    self._llm_fail_streak += 1
-                    _runlog("screen_fail", f"淘汰 {label}：{result.fail_reason}", app_id, "WARNING")
-                    await self._back_to_anchor(driver)
-                    if self._llm_fail_streak >= 3:
-                        self._running = False
-                        self.state = "STOPPED"
-                        self.paused_reason = (
-                            "LLM 连续不可用（如 403）：请更换 GPT_API_KEY/中转，"
-                            "或在规则页关闭 LLM 打分后重新启动"
-                        )
-                        _runlog("llm_down", self.paused_reason, level="ERROR")
-                        return
-                    continue
-                self._llm_fail_streak = 0
                 if result.final != "CLAIMED":
                     _runlog("screen_fail", f"淘汰 {label}：{result.fail_reason}", app_id)
                     await self._back_to_anchor(driver)
                     continue
-                _runlog("screen_pass",
-                        f"通过 {label}：{'未打分' if result.score < 0 else str(int(result.score)) + '分'}",
-                        app_id)
+                _runlog("screen_pass", f"通过 {label}", app_id)
 
                 # ---- 投递（dispatcher 状态机；人已在详情页）----
                 outcome = await dispatcher.dispatch_one(app_id, driver, rules)

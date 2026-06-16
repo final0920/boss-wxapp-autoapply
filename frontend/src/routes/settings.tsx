@@ -1,8 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useI18n, type Locale } from '../lib/i18n'
-import { Button, Card, CardHeader, CardTitle, CardContent, Input } from '../components/ui'
-import { apiGet, apiPut } from '../api'
+import { Button, Card, CardHeader, CardTitle, CardContent } from '../components/ui'
+import { apiPut } from '../api'
 
 type BackendOverride = 'auto' | 'uia' | 'vision'
 
@@ -11,9 +11,6 @@ interface SettingsState {
   backendLocked: boolean
   language: Locale
   theme: 'light' | 'dark'
-  // 只读展示，Key 走 .env，不由前端存储
-  modelName: string
-  modelBaseUrl: string
 }
 
 // 后端未连通时的合理默认值
@@ -22,33 +19,13 @@ const FALLBACK: SettingsState = {
   backendLocked: false,
   language: 'zh',
   theme: 'light',
-  modelName: '—',
-  modelBaseUrl: '—',
 }
 
 function SettingsPage() {
   const { t, setLocale } = useI18n()
   const [cfg, setCfg] = useState<SettingsState>(FALLBACK)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-
-  // 加载模型只读信息（model/base_url 来自 .env，经后端 /config/model-info 暴露，不含 Key）
-  useEffect(() => {
-    let cancelled = false
-    apiGet<{ model: string; base_url: string; reasoning: string }>('/config/model-info')
-      .then(data => {
-        if (!cancelled) {
-          setCfg(prev => ({ ...prev, modelName: data.model, modelBaseUrl: data.base_url }))
-        }
-      })
-      .catch(() => {
-        // 加载失败：保留 fallback 占位，不阻塞其余设置项
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [])
 
   const update = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) =>
     setCfg(prev => ({ ...prev, [key]: value }))
@@ -81,33 +58,6 @@ function SettingsPage() {
   return (
     <div className="p-6 space-y-4 max-w-lg">
       <h1 className="text-2xl font-serif font-semibold text-foreground">{t.settings.title}</h1>
-
-      {loading && (
-        <p className="text-sm text-muted-foreground">加载配置中…</p>
-      )}
-
-      {/* 模型配置 — 只读展示，Key 走 .env */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t.settings.modelConfig}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Model</label>
-              <Input value={cfg.modelName} readOnly className="cursor-not-allowed opacity-70" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Base URL</label>
-              <Input value={cfg.modelBaseUrl} readOnly className="cursor-not-allowed opacity-70" />
-            </div>
-          </div>
-          {/* API Key 从 .env 注入，后端持有，前端不存储 */}
-          <p className="text-xs text-muted-foreground bg-muted/60 border border-border/60 rounded-xl px-3 py-2">
-            {t.settings.apiKeyNote}
-          </p>
-        </CardContent>
-      </Card>
 
       {/* 后端覆盖 */}
       <Card>

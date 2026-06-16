@@ -38,12 +38,6 @@ class RulesConfig(BaseModel):
     exclude_agency: bool = False     # 跳过猎头/代招岗位（按卡片 HR 职务关键词判定，列表级）
     agency_keywords: list[str] = ["猎头", "代招", "招聘代理", "人才经纪"]  # HR 职务含其一 → 视为猎头/代招
 
-    # ---- LLM ----
-    llm_enabled: bool = True          # 关闭则跳过 LLM：硬过滤通过即投递（不打分、不调 LLM）
-    llm_threshold: int = 80
-    profile: str = ""                # 候选人画像，喂打分 prompt
-    greeting_prompt: str = ""        # 预留。当前 Boss App 端"自动打招呼"，系统不发文本
-
     # ---- 投递节奏 ----
     daily_limit: int = 100
     interval_min_sec: int = 20

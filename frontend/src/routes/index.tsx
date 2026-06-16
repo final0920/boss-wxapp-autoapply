@@ -111,12 +111,6 @@ function RunnerPanel() {
             <strong className="text-foreground">{st?.today_applied ?? 0}</strong>
             <span className="opacity-70"> / {st?.daily_limit ?? '—'}</span>
           </span>
-          <span>
-            VLM 调用：
-            <strong className="text-foreground">{st?.today_vlm_calls ?? 0}</strong>
-            <span className="opacity-70"> / {st?.vlm_daily_budget ?? '—'}</span>
-            {st?.vlm_circuit_open && <strong className="text-destructive"> ·熔断</strong>}
-          </span>
           {st && Object.entries(st.stats).map(([k, v]) => (
             <span key={k}>
               {STAT_LABELS[k] ?? k}：<strong className="text-foreground">{v}</strong>

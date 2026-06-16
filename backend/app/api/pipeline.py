@@ -5,8 +5,6 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.config import settings
-from app.pipeline.rate_limiter import rate_limiter
 from app.pipeline.runner import runner
 from app.security.auth import require_auth
 
@@ -47,8 +45,5 @@ async def stop_pipeline() -> dict:
 
 @router.get("/status", dependencies=[Depends(require_auth)])
 async def pipeline_status() -> dict:
-    """runner 状态：state/子态/paused_reason/统计/今日配额/VLM 预算。"""
-    base = await runner.status()
-    vlm = await rate_limiter.get_vlm_quota(daily_budget=settings.vlm_daily_budget)
-    base.update(vlm)
-    return base
+    """runner 状态：state/子态/paused_reason/统计/今日配额。"""
+    return await runner.status()

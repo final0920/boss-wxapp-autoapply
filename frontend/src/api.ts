@@ -70,10 +70,6 @@ export interface RulesConfig {
   dedup_contacted: boolean
   exclude_agency: boolean
   agency_keywords: string[]
-  llm_enabled: boolean
-  llm_threshold: number
-  profile: string
-  greeting_prompt: string
   daily_limit: number
   interval_min_sec: number
   interval_max_sec: number
@@ -101,10 +97,6 @@ export interface PipelineStatus {
   stats: Record<string, number>
   today_applied: number
   daily_limit: number
-  // M5 VLM 预算（后端 /pipeline/status 经 rate_limiter.get_vlm_quota 返回）
-  today_vlm_calls?: number
-  vlm_daily_budget?: number
-  vlm_circuit_open?: boolean
   date?: string
 }
 
@@ -148,6 +140,18 @@ export interface ApplicationRecord {
 
 export const getApplications = (status?: string) =>
   apiGet<ApplicationRecord[]>('/applications', status ? { status } : undefined)
+
+// 拉全量投递记录（循环翻页，规避后端默认 limit=100 → 旧前端永远只显示 100 条的 bug）
+export async function getAllApplications(): Promise<ApplicationRecord[]> {
+  const PAGE = 500
+  const all: ApplicationRecord[] = []
+  for (let skip = 0; ; skip += PAGE) {
+    const rows = await apiGet<ApplicationRecord[]>('/applications', { skip, limit: PAGE })
+    all.push(...rows)
+    if (rows.length < PAGE) break
+  }
+  return all
+}
 export const confirmApplication = (id: number, sent: boolean) =>
   apiPost(`/applications/${id}/confirm`, { sent })
 export const clearHistory = () =>

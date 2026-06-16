@@ -329,10 +329,9 @@ def _check_detail_hard(job: Job, rules: RulesConfig) -> tuple[bool, str, list[st
 
 
 def screen(job: Job, rules: RulesConfig) -> ScreenResult:
-    """详情级筛选：硬过滤 -> LLM 打分 -> 阈值判定。
+    """详情级筛选：纯硬过滤（CDP 架构无 LLM 打分）。
 
-    缺失字段放行并在 reasons 中标注 missing:<field>。
-    LLM 调用使用 app.llm.client.get_client().chat(json_mode=True)。
+    缺失字段放行并在 reasons 中标注 missing:<field>；硬过滤通过即 CLAIMED。
     """
     result = ScreenResult()
 
@@ -346,47 +345,8 @@ def screen(job: Job, rules: RulesConfig) -> ScreenResult:
         return result
 
     result.passed_hard = True
-
-    # LLM 打分可关闭：关闭则硬过滤通过即投（不调 LLM）
-    if not rules.llm_enabled:
-        result.score = -1.0   # 哨兵：未打分
-        result.final = "CLAIMED"
-        result.reasons.append("LLM 打分已关闭：硬过滤通过，直接投递")
-        return result
-
-    from app.llm.client import get_client  # 延迟导入避免循环
-
-    profile_section = f"\n候选人画像：{rules.profile}" if rules.profile else ""
-    prompt = (
-        "你是一位求职助理，请对以下岗位打分（0-100 分），并给出简短理由列表。\n"
-        f"职位：{job.title}\n公司：{job.company}\n薪资：{job.salary}\n"
-        f"城市：{job.area}\nJD：{job.jd[:500]}{profile_section}\n\n"
-        '请以 JSON 格式回答：{"score": <int 0-100>, "reasons": [<str>, ...]}'
-    )
-    try:
-        raw = get_client().chat(
-            messages=[{"role": "user", "content": prompt}],
-            json_mode=True,
-        )
-        data = json.loads(raw) if isinstance(raw, str) else raw
-        result.score = float(data.get("score", 0))
-        result.reasons.extend(data.get("reasons", []))
-    except Exception as exc:
-        logger.warning("screener LLM 打分失败: %s", exc)
-        result.llm_unavailable = True
-        result.score = 0.0
-        result.reasons.append(f"LLM 调用失败: {type(exc).__name__}: {str(exc)[:80]}")
-
-    # 阈值判定
-    if result.llm_unavailable:
-        result.final = "FAILED"
-        result.fail_reason = "LLM 不可用（如 403 被拒）：检查 GPT_API_KEY/中转，或在规则页关闭 LLM 打分"
-    elif result.score >= rules.llm_threshold:
-        result.final = "CLAIMED"
-    else:
-        result.final = "FAILED"
-        result.fail_reason = f"评分 {result.score:.0f} < 阈值 {rules.llm_threshold}"
-
+    result.score = -1.0   # 哨兵：未打分
+    result.final = "CLAIMED"
     return result
 
 

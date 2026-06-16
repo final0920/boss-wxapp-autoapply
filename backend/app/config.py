@@ -1,6 +1,5 @@
 """
 应用配置：pydantic-settings 从 .env 读取。
-缺 GPT_API_KEY 时启动报错（AC14）。
 """
 from __future__ import annotations
 
@@ -14,12 +13,6 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
-
-    # LLM
-    gpt_api_key: str = ""
-    gpt_base_url: str = "https://gpt.pkpp.cn/v1"
-    gpt_model: str = "gpt-5.5"
-    gpt_reasoning: str = "high"
 
     # Server
     bind_host: str = "127.0.0.1"
@@ -40,23 +33,9 @@ class Settings(BaseSettings):
     inbox_poll_min_sec: int = 120
     inbox_poll_max_sec: int = 300
 
-    # LLM/VLM（httpx 直连；视觉定位/抽取用低推理省时，见 plan §2.5）
-    llm_timeout_sec: int = 120
-    vlm_reasoning: str = "low"
-    vlm_daily_budget: int = 2000  # 每日 VLM 调用上限（成本熔断，M5 接入）
-
     # CDP（WMPFDebugger 代理；M0 验证见 plan §2.5）
     cdp_url: str = "ws://127.0.0.1:62000"
     cdp_connect_timeout_sec: int = 10
-
-    @model_validator(mode="after")
-    def _require_gpt_api_key(self) -> "Settings":
-        if not self.gpt_api_key:
-            raise ValueError(
-                "GPT_API_KEY is required but not set. "
-                "Copy .env.example to .env and fill in GPT_API_KEY."
-            )
-        return self
 
     @field_validator("bind_host")
     @classmethod

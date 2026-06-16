@@ -1,5 +1,5 @@
 """
-RateLimiter — 投递配额 + VLM 调用预算唯一真相源。
+RateLimiter — 投递配额唯一真相源。
 
 持久化到 Quota 表，重启后配额不丢失。
 """
@@ -62,33 +62,6 @@ def _sync_get_quota(daily_limit: int) -> dict:
         }
 
 
-def _sync_check_consume_vlm(daily_budget: int) -> bool:
-    """检查并消耗一次 VLM 调用配额。返回 False 表示今日已达上限（熔断）。"""
-    day = _today()
-    with Session(engine) as session:
-        q = _get_or_create_quota(session, day)
-        if q.vlm_count >= daily_budget:
-            return False
-        q.vlm_count += 1
-        q.updated_at = __import__("datetime").datetime.now()
-        session.add(q)
-        session.commit()
-        return True
-
-
-def _sync_get_vlm_quota(daily_budget: int) -> dict:
-    day = _today()
-    with Session(engine) as session:
-        q = _get_or_create_quota(session, day)
-        count = q.vlm_count
-    return {
-        "date": day,
-        "today_vlm_calls": count,
-        "vlm_daily_budget": daily_budget,
-        "vlm_circuit_open": count >= daily_budget,
-    }
-
-
 # ---------------------------------------------------------------------------
 # 公开异步接口
 # ---------------------------------------------------------------------------
@@ -101,7 +74,6 @@ class RateLimiter:
     用法：
         from app.pipeline.rate_limiter import rate_limiter
         ok = await rate_limiter.check_and_consume_apply(daily_limit=rules.daily_limit)
-        ok = await rate_limiter.check_and_consume_vlm()
     """
 
     async def check_and_consume_apply(
@@ -125,24 +97,8 @@ class RateLimiter:
         async with _lock:
             return _sync_get_quota(daily_limit)
 
-    async def check_and_consume_vlm(
-        self,
-        daily_budget: int = settings.vlm_daily_budget,
-    ) -> bool:
-        """消耗一次 VLM 调用配额。超限返回 False（熔断）。"""
-        async with _lock:
-            return _sync_check_consume_vlm(daily_budget)
-
-    async def get_vlm_quota(
-        self,
-        daily_budget: int = settings.vlm_daily_budget,
-    ) -> dict:
-        """返回今日 VLM 配额快照（today_vlm_calls/vlm_daily_budget/vlm_circuit_open）。"""
-        async with _lock:
-            return _sync_get_vlm_quota(daily_budget)
-
     async def reset_quota_for_test(self) -> None:
-        """仅供测试使用：重置今日配额（含 VLM）。"""
+        """仅供测试使用：重置今日配额。"""
         day = _today()
         async with _lock:
             with Session(engine) as session:
@@ -150,7 +106,6 @@ class RateLimiter:
                 q = session.exec(stmt).first()
                 if q:
                     q.apply_count = 0
-                    q.vlm_count = 0
                     session.add(q)
                     session.commit()
 
