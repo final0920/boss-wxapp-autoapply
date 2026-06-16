@@ -5,6 +5,7 @@ import { useI18n } from '../lib/i18n'
 import { Badge, Button, Card, CardHeader, CardTitle, CardContent } from '../components/ui'
 import { getPipelineStatus, startPipeline, stopPipeline } from '../api'
 import type { PipelineStatus } from '../api'
+import { DecisionLog } from '../components/DecisionLog'
 
 // ---------------------------------------------------------------------------
 // Runner control panel: status / sub-state / stats / start-stop
@@ -171,6 +172,9 @@ function IndexPage() {
 
       {/* Runner control panel */}
       <RunnerPanel />
+
+      {/* 决策日志（直接嵌在会话下方空白处，不再单独菜单） */}
+      <DecisionLog />
     </div>
   )
 }
