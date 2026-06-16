@@ -56,8 +56,12 @@ def load_rules(session: Session) -> RulesConfig:
         return RulesConfig()
     try:
         data = json.loads(row.value)
-        # extra="forbid" 会拒绝未知字段；用 model_validate 而非 parse_raw
-        # 对旧数据宽容：先用 ignore 模式解析，再重新序列化为严格对象
+        # extra="forbid" 用于 API PUT 路径拒绝未知字段；但 DB 里的历史行可能
+        # 残留已删除字段（如旧的 llm_*）。对持久化数据宽容：先剔除模型未声明的
+        # key 再校验，避免一处字段下线就让整份用户配置回退默认值。
+        if isinstance(data, dict):
+            known = RulesConfig.model_fields.keys()
+            data = {k: v for k, v in data.items() if k in known}
         return RulesConfig.model_validate(data)
     except Exception as exc:
         logger.warning("rules.load_rules: 解析失败，回退默认值。原因: %s", exc)
