@@ -32,6 +32,7 @@ class RawJob:
     company_scale: str = ""
     finance_stage: str = ""
     hr_name: str = ""
+    hr_title: str = ""    # HR 职务（如"猎头顾问"/"人力资源经理"），用于猎头/代招过滤
     hr_active: str = ""
 
 

@@ -210,6 +210,10 @@ def prefilter(job: Job, rules: RulesConfig) -> tuple[bool, str]:
     if not _salary_intersects(job_min, job_max, rules.salary_min_k, rules.salary_max_k):
         return (False, f"薪资不匹配: {job.salary}")
 
+    # 1b. 起步薪资下限：岗位薪资下界低于门槛 → 滤（如门槛 12，10-15K 下界 10<12 被滤；面议/解析失败不滤）
+    if rules.salary_floor_k > 0 and job_min > 0 and job_min < rules.salary_floor_k:
+        return (False, f"起步薪资偏低: {job.salary}（下界<{rules.salary_floor_k:g}K）")
+
     # 2. allowed_cities：包含匹配 job.area
     if rules.allowed_cities and job.area:
         if not any(city in job.area for city in rules.allowed_cities):

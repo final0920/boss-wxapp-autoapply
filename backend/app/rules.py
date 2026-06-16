@@ -23,6 +23,7 @@ class RulesConfig(BaseModel):
     # ---- 列表级硬过滤 ----
     salary_min_k: float = 0          # 期望薪资下限(K)。0=不限。判据: 区间相交
     salary_max_k: float = 0          # 期望薪资上限(K)。0=不限
+    salary_floor_k: float = 0        # 起步薪资下限(K)：岗位薪资**下界** < 此值则滤掉(如12→10-15K 下界10<12 被滤)。0=不限；面议(解析失败)不滤
     allowed_cities: list[str] = []   # 空=不限；包含匹配 Job.area
     blocked_areas: list[str] = []    # 区域黑名单，包含匹配
     include_keywords: list[str] = [] # 空=不限；列表级对 title，详情级对 title+jd，含其一即过
@@ -34,6 +35,8 @@ class RulesConfig(BaseModel):
     my_experience_years: int = 0     # 我的年限。岗位要求下限 > 我 → 滤。0=不限
     hr_active_within_days: int = 0   # HR 活跃天数门槛。0=不限
     dedup_contacted: bool = True     # 设备级"继续沟通"跳过(→DUP) + jd_hash 去重
+    exclude_agency: bool = False     # 跳过猎头/代招岗位（按卡片 HR 职务关键词判定，列表级）
+    agency_keywords: list[str] = ["猎头", "代招", "招聘代理", "人才经纪"]  # HR 职务含其一 → 视为猎头/代招
 
     # ---- LLM ----
     llm_enabled: bool = True          # 关闭则跳过 LLM：硬过滤通过即投递（不打分、不调 LLM）

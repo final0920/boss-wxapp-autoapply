@@ -91,7 +91,7 @@ class PipelineRunner:
         self.stats = {"collected": 0, "prefilter_fail": 0, "screened": 0,
                       "applied": 0, "dup": 0, "failed": 0, "inbox_new": 0}
         self._llm_fail_streak = 0
-        self._source = "new_jobs"  # 采集源：新职位优先 → 喂尽切 job_list
+        self._source = "job_list"  # 采集源：职位列表（推荐）
         self._task = asyncio.create_task(self._run(), name="pipeline-runner")
         return True
 
@@ -216,9 +216,9 @@ class PipelineRunner:
         return await asyncio.to_thread(driver.ensure_on_list)
 
     async def _back_to_anchor(self, driver) -> None:
-        """投递/失败后回到当前采集源锚点页。"""
+        """投递/失败后回到当前采集源锚点页（按返回键退栈，保留 feed 不刷新）。"""
         if self._source == "new_jobs":
-            await asyncio.to_thread(driver.goto_new_jobs)
+            await asyncio.to_thread(driver.back_to_new_jobs)
         else:
             await asyncio.to_thread(driver.back_to_list)
 
@@ -287,23 +287,25 @@ class PipelineRunner:
                     scroll_misses += 1
                     if scroll_misses >= SCROLL_MISS_LIMIT:
                         scroll_misses = 0
-                        if self._source == "new_jobs":
-                            # 新职位 feed 喂尽 → 切到职位列表
-                            self._source = "job_list"
-                            _runlog("source_switch", "新职位 feed 已投尽，切换到职位列表")
-                        else:
-                            # 职位列表也喂尽：巡检 + 长歇，再回到新职位优先
-                            n = await asyncio.to_thread(inbox_watcher.poll_once, driver)
-                            self.stats["inbox_new"] += n
-                            last_inbox_ts = _time.monotonic()
-                            await self._sleep(60)
-                            self._source = "new_jobs"
-                            _runlog("source_switch", "职位列表喂尽，回到新职位优先")
+                        # 职位列表暂投尽：回顶+下拉刷新 + 巡检 + 歇 3 分钟等新岗
+                        _runlog("feed_idle", "职位列表暂投尽，回顶+刷新+巡检+歇 3 分钟等新岗")
+                        await asyncio.to_thread(driver.refresh_feed)
+                        n = await asyncio.to_thread(inbox_watcher.poll_once, driver)
+                        self.stats["inbox_new"] += n
+                        last_inbox_ts = _time.monotonic()
+                        await self._sleep(180)
                     continue
                 scroll_misses = 0
 
                 card = fresh[0]
                 seen.add((card.raw.company, card.raw.title))
+                # ---- 猎头/代招过滤（列表级，HR 职务含关键词，零额外设备动作）----
+                if rules.exclude_agency and card.raw.hr_title and any(
+                        kw in card.raw.hr_title for kw in (rules.agency_keywords or [])):
+                    _runlog("agency_skip",
+                            f"跳过猎头/代招 {card.raw.company}｜{card.raw.title}（{card.raw.hr_title}）")
+                    self.stats["prefilter_fail"] += 1
+                    continue
                 app_ids = collect_jobs([card.raw])
                 if not app_ids:
                     continue  # jd_hash 已存在（历史已采/已投）

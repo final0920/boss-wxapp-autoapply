@@ -73,6 +73,17 @@ export function RuleConfigForm({ config, loading, onChange }: RuleConfigFormProp
               />
             </div>
           </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">{t.rules.salaryFloor}</label>
+            <Input
+              type="number"
+              min={0}
+              value={config.salary_floor_k}
+              disabled={loading}
+              onChange={e => onChange('salary_floor_k', Number(e.target.value))}
+            />
+            <p className="text-xs text-muted-foreground">{t.rules.salaryFloorHint}</p>
+          </div>
           <p className="text-xs text-muted-foreground">{t.rules.salaryHint}</p>
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">{t.rules.allowedCities}</label>
@@ -202,6 +213,16 @@ export function RuleConfigForm({ config, loading, onChange }: RuleConfigFormProp
               className="accent-primary"
             />
             {t.rules.dedupContacted}
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.exclude_agency}
+              disabled={loading}
+              onChange={e => onChange('exclude_agency', e.target.checked)}
+              className="accent-primary"
+            />
+            {t.rules.excludeAgency}
           </label>
         </CardContent>
       </Card>

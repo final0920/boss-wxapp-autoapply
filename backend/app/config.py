@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     vlm_reasoning: str = "low"
     vlm_daily_budget: int = 2000  # 每日 VLM 调用上限（成本熔断，M5 接入）
 
+    # CDP（WMPFDebugger 代理；M0 验证见 plan §2.5）
+    cdp_url: str = "ws://127.0.0.1:62000"
+    cdp_connect_timeout_sec: int = 10
+
     @model_validator(mode="after")
     def _require_gpt_api_key(self) -> "Settings":
         if not self.gpt_api_key:

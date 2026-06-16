@@ -58,6 +58,7 @@ export default api
 export interface RulesConfig {
   salary_min_k: number
   salary_max_k: number
+  salary_floor_k: number
   allowed_cities: string[]
   blocked_areas: string[]
   include_keywords: string[]
@@ -67,6 +68,8 @@ export interface RulesConfig {
   my_experience_years: number
   hr_active_within_days: number
   dedup_contacted: boolean
+  exclude_agency: boolean
+  agency_keywords: string[]
   llm_enabled: boolean
   llm_threshold: number
   profile: string
