@@ -1,10 +1,9 @@
 """
-FastAPI + python-socketio ASGI 组合入口
+FastAPI ASGI 入口
 
 lifespan:
   - 初始化 DB（建表）
   - 启动自检 scan_sending（AC8）
-  - 注册 scrcpy Socket.IO 命名空间
   - shutdown：停止调度器
 
 BIND_HOST 由 uvicorn 启动命令读取（见 __main__ 块）。
@@ -16,7 +15,6 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -26,48 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Socket.IO server（默认命名空间鉴权；/scrcpy 命名空间在 lifespan 注册）
-# ---------------------------------------------------------------------------
-
-sio = socketio.AsyncServer(
-    async_mode="asgi",
-    # transport 层放行（含经 vite 代理的跨端口 Origin）；真正的 Origin/token 校验
-    # 在 connect 事件的 sio_auth_ok 中完成。空列表会在握手层直接 403，sio_auth_ok
-    # 根本跑不到。localhost-bind + sio_auth_ok(Origin+token) 已是纵深防御。
-    cors_allowed_origins="*",
-    logger=False,
-    engineio_logger=False,
-)
-
-
-@sio.event
-async def connect(sid: str, environ: dict, auth: dict | None = None) -> bool:
-    """默认命名空间 connect：鉴权 (AC12)。"""
-    from app.security.auth import sio_auth_ok
-
-    if not sio_auth_ok(environ):
-        logger.warning("Socket.IO 连接已拒绝 sid=%s", sid)
-        return False
-    logger.debug("Socket.IO 已连接 sid=%s", sid)
-    return True
-
-
-@sio.event
-async def disconnect(sid: str) -> None:
-    logger.debug("Socket.IO 已断开 sid=%s", sid)
-
-
-# ---------------------------------------------------------------------------
 # Lifespan
 # ---------------------------------------------------------------------------
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # 启动初始化（建表/崩溃自检/scrcpy 命名空间注册）已移至模块级
-    # _startup_init()（见 asgi_app 构造前）。原因：socketio.ASGIApp 包装下
-    # FastAPI 的 lifespan scope 不被转发执行——曾导致 /scrcpy 命名空间从未注册、
-    # 投屏空白。lifespan 仅保留 shutdown 钩子（若运行环境恰好转发则生效）。
+    # 启动初始化（建表/崩溃自检）在模块级 _startup_init() 同步完成（见下）。
+    # lifespan 仅保留 shutdown 钩子。
     logger.info("boss-autoapply lifespan enter bind_host=%s", settings.bind_host)
     yield
 
@@ -144,9 +108,7 @@ async def health() -> dict:
 # ---------------------------------------------------------------------------
 # 启动初始化（模块级，确保执行）
 # ---------------------------------------------------------------------------
-# socketio.ASGIApp(other_asgi_app=app) 不向 FastAPI 转发 lifespan scope，
-# 因此 DB 建表 / 崩溃自检 / scrcpy 命名空间注册必须在此同步完成，
-# 不能依赖 @asynccontextmanager lifespan（已验证 lifespan 内 register 从未生效）。
+# DB 建表 / 崩溃自检在模块导入时同步完成，简单可靠。
 
 def _startup_init() -> None:
     if not settings.terminal_token:
@@ -170,10 +132,10 @@ _startup_init()
 
 
 # ---------------------------------------------------------------------------
-# ASGI 组合：Socket.IO 包裹 FastAPI
+# ASGI 入口
 # ---------------------------------------------------------------------------
 
-asgi_app = socketio.ASGIApp(sio, other_asgi_app=app)
+asgi_app = app
 
 
 # ---------------------------------------------------------------------------

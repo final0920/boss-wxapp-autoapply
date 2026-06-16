@@ -1,18 +1,13 @@
 """
 端点鉴权主防线（AC12 / P0-B）
 
-主防线 = localhost-bind + Bearer token + Origin 校验，统一套到所有带写/设备副作用端点：
-  /control/*  /terminal (WS)  /devices  /config
-  scrcpy Socket.IO  SSE 事件流
+主防线 = localhost-bind + Bearer token + Origin 校验，统一套到所有带写/设备副作用端点。
 
 用法（FastAPI 依赖注入）：
     from app.security.auth import require_auth
     @router.post("/control/tap")
     async def tap(req: Request, _: None = Depends(require_auth)):
         ...
-
-Socket.IO / WebSocket 端点不走 Depends，需手动调用：
-    await verify_ws_request(request, token=query_token)
 """
 from __future__ import annotations
 
@@ -144,63 +139,3 @@ async def require_auth(
     _check_origin(request)
     _check_peer_ip(request)
     _check_token(credentials)
-
-
-# ---------------------------------------------------------------------------
-# Manual check for WebSocket / Socket.IO handshake
-# ---------------------------------------------------------------------------
-
-
-async def verify_ws_request(request: Request, token: str | None = None) -> None:
-    """在 WS/Socket.IO 连接握手阶段调用。
-
-    WS 升级请求不携带 HTTP Authorization 头；token 通过
-    查询参数 `?token=...` 传入。
-    """
-    _check_origin(request)
-    _check_peer_ip(request)
-    if settings.terminal_token:
-        if token is None or not _token_ok(token):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or missing token for WebSocket connection",
-            )
-
-
-# ---------------------------------------------------------------------------
-# Socket.IO connect-event auth helper (no exceptions — returns bool)
-# ---------------------------------------------------------------------------
-
-
-def sio_auth_ok(environ: dict) -> bool:
-    """校验 Socket.IO connect 事件的鉴权。
-
-    由 socketio 服务器的 connect 处理器调用。
-    `environ` 是 python-socketio 传入的 ASGI scope 字典。
-    """
-    # Origin 校验
-    origin = ""
-    for k, v in environ.get("headers", []):
-        key = k.decode() if isinstance(k, bytes) else k
-        if key.lower() == "origin":
-            origin = v.decode() if isinstance(v, bytes) else v
-            break
-    if origin and not _is_localhost_origin(origin):
-        logger.warning("Socket.IO 已拒绝跨域连接 origin=%s", origin)
-        return False
-
-    # Token 校验
-    if settings.terminal_token:
-        query_string = environ.get("QUERY_STRING", "")
-        if isinstance(query_string, bytes):
-            query_string = query_string.decode()
-        token = ""
-        for part in query_string.split("&"):
-            if part.startswith("token="):
-                token = part[len("token="):]
-                break
-        if not _token_ok(token):
-            logger.warning("Socket.IO 已拒绝：token 缺失或无效")
-            return False
-
-    return True
