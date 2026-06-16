@@ -7,7 +7,6 @@ export const en: I18nKeys = {
     applications: 'History',
     inbox: 'Inbox',
     rules: 'Rules',
-    logs: 'Logs',
     settings: 'Settings',
   },
   device: {
@@ -25,16 +24,6 @@ export const en: I18nKeys = {
     notReady: 'Open BOSS Zhipin miniprogram in WeChat',
     previewMode: 'Read-only preview',
     previewDesc: 'Screenshot refreshes every 1.5 s. View only.',
-    screenshot: 'Screenshot',
-    fallback: 'Screenshot fallback mode',
-  },
-  jobs: {
-    title: 'Job Feed',
-    score: 'Score',
-    reason: 'Reason',
-    blacklist: 'Blacklist',
-    pin: 'Pin',
-    fetch: 'Fetch',
   },
   applications: {
     title: 'Application Board',
@@ -45,13 +34,9 @@ export const en: I18nKeys = {
       SENT: 'Sent',
       FAILED: 'Failed',
     },
-    pendingConfirm: 'Pending Manual Confirm',
-    confirmSent: 'Confirm Sent',
-    confirmNotSent: 'Confirm Not Sent',
   },
   inbox: {
     title: 'HR Inbox',
-    unread: 'Unread',
     takeover: 'Take Over',
     takeoverDesc: 'Switch to manual mode and jump to screen',
   },
@@ -101,12 +86,6 @@ export const en: I18nKeys = {
       '7': 'Within 7 days',
       '30': 'Within 30 days',
     },
-  },
-  logs: {
-    title: 'Logs & Cost',
-    backendSwitch: 'Backend Switch',
-    pause: 'Pause',
-    trace: 'Trace',
   },
   settings: {
     title: 'Settings',

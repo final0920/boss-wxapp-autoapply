@@ -24,7 +24,7 @@ const FALLBACK: SettingsState = {
 function SettingsPage() {
   const { t, setLocale } = useI18n()
   const [cfg, setCfg] = useState<SettingsState>(FALLBACK)
-  const [loading, setLoading] = useState(false)
+  const [loading] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
   const update = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) =>

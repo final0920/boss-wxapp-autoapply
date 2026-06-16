@@ -1,5 +1,5 @@
 import { useI18n } from '../lib/i18n'
-import { Button, Card, CardHeader, CardTitle, CardContent, Input, TagInput } from './ui'
+import { Card, CardHeader, CardTitle, CardContent, Input, TagInput } from './ui'
 import type { RulesConfig } from '../api'
 
 const COMPANY_SCALES = [

@@ -8,6 +8,7 @@ import { getRules, putRules, type RulesConfig } from '../api'
 const FALLBACK: RulesConfig = {
   salary_min_k: 0,
   salary_max_k: 0,
+  salary_floor_k: 0,
   allowed_cities: [],
   blocked_areas: [],
   include_keywords: [],
@@ -17,6 +18,8 @@ const FALLBACK: RulesConfig = {
   my_experience_years: 0,
   hr_active_within_days: 0,
   dedup_contacted: true,
+  exclude_agency: false,
+  agency_keywords: ['猎头', '代招', '招聘代理', '人才经纪'],
   daily_limit: 100,
   interval_min_sec: 20,
   interval_max_sec: 90,

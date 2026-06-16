@@ -3,7 +3,6 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useSession } from '../lib/device-context'
 import { useI18n } from '../lib/i18n'
 import { Card, CardContent } from '../components/ui'
-import { apiGet } from '../api'
 
 const SCREENSHOT_INTERVAL_MS = 1500
 

@@ -1,7 +1,7 @@
 [project]
 name = "boss-wxapp-autoapply-backend"
 version = "0.1.0"
-description = "PC 微信小程序版 BOSS直聘 半自动投递：截图+VLM+SendInput 非侵入控制 + 结构化筛选 + 投递看板"
+description = "PC 微信小程序版 BOSS直聘 自动投递：CDP/Frida 注入读写 + 结构化筛选 + 投递看板"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -12,8 +12,6 @@ dependencies = [
     "python-dotenv>=1.0",
     "pillow>=11.0",
     "httpx>=0.28",
-    "rapidocr-onnxruntime>=1.4",
-    "opencv-python-headless>=4.10",
 ]
 
 [project.optional-dependencies]

@@ -23,11 +23,6 @@ class Settings(BaseSettings):
 
     # Rate limits (仅作 RulesConfig 首次缺省填充；运行期以 Config.rules 为权威)
     daily_apply_limit: int = 150
-    apply_interval_min: int = 20
-    apply_interval_max: int = 90
-
-    # Pipeline
-    score_threshold: int = 80
 
     # Inbox watcher poll interval (seconds)
     inbox_poll_min_sec: int = 120

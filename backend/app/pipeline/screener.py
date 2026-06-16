@@ -14,7 +14,6 @@ screener — 纯函数筛选层（§3/§7，去 LangGraph）。
 """
 from __future__ import annotations
 
-import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -263,7 +262,6 @@ class ScreenResult:
     reasons: list[str] = field(default_factory=list)
     final: str = "FAILED"        # "CLAIMED" | "FAILED"
     fail_reason: str = ""
-    llm_unavailable: bool = False  # LLM 调用失败（如 403）；区别于"分数不够"
 
 
 # ---------------------------------------------------------------------------
@@ -370,13 +368,5 @@ def apply_screen_result(
     app.fail_reason = result.fail_reason
     app.updated_at = datetime.now()
     session.add(app)
-
-    if result.score > 0:
-        job = session.get(Job, app.job_id)
-        if job is not None:
-            job.score = result.score
-            job.reasons = json.dumps(result.reasons, ensure_ascii=False)
-            job.updated_at = datetime.now()
-            session.add(job)
 
     session.commit()

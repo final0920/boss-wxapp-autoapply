@@ -138,9 +138,6 @@ export interface ApplicationRecord {
   job?: JobInfo
 }
 
-export const getApplications = (status?: string) =>
-  apiGet<ApplicationRecord[]>('/applications', status ? { status } : undefined)
-
 // 拉全量投递记录（循环翻页，规避后端默认 limit=100 → 旧前端永远只显示 100 条的 bug）
 export async function getAllApplications(): Promise<ApplicationRecord[]> {
   const PAGE = 500

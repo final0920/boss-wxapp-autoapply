@@ -5,7 +5,6 @@ export const zh = {
     applications: '投递历史',
     inbox: '收件箱',
     rules: '规则',
-    logs: '日志',
     settings: '设置',
   },
   device: {
@@ -23,16 +22,6 @@ export const zh = {
     notReady: '请在微信中打开 BOSS直聘 小程序',
     previewMode: '只读预览',
     previewDesc: '每 1.5 秒自动刷新窗口截图，仅供查看。',
-    screenshot: '截图',
-    fallback: '截图降级模式',
-  },
-  jobs: {
-    title: '岗位流',
-    score: '评分',
-    reason: '理由',
-    blacklist: '加黑',
-    pin: '置顶',
-    fetch: '抓取',
   },
   applications: {
     title: '投递看板',
@@ -43,13 +32,9 @@ export const zh = {
       SENT: '已发送',
       FAILED: '失败',
     },
-    pendingConfirm: '待人工确认',
-    confirmSent: '确认已发',
-    confirmNotSent: '确认未发',
   },
   inbox: {
     title: 'HR 收件箱',
-    unread: '未读',
     takeover: '一键接管',
     takeoverDesc: '切换手动模式并跳转投屏',
   },
@@ -99,12 +84,6 @@ export const zh = {
       '7': '7 天内',
       '30': '30 天内',
     },
-  },
-  logs: {
-    title: '日志与成本',
-    backendSwitch: '后端切换',
-    pause: '暂停',
-    trace: '追踪',
   },
   settings: {
     title: '设置',

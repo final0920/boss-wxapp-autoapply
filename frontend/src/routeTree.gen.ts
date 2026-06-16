@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ScreenRouteImport } from './routes/screen'
 import { Route as RulesRouteImport } from './routes/rules'
-import { Route as LogsRouteImport } from './routes/logs'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as ApplicationsRouteImport } from './routes/applications'
 import { Route as IndexRouteImport } from './routes/index'
@@ -30,11 +29,6 @@ const ScreenRoute = ScreenRouteImport.update({
 const RulesRoute = RulesRouteImport.update({
   id: '/rules',
   path: '/rules',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LogsRoute = LogsRouteImport.update({
-  id: '/logs',
-  path: '/logs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InboxRoute = InboxRouteImport.update({
@@ -57,7 +51,6 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/applications': typeof ApplicationsRoute
   '/inbox': typeof InboxRoute
-  '/logs': typeof LogsRoute
   '/rules': typeof RulesRoute
   '/screen': typeof ScreenRoute
   '/settings': typeof SettingsRoute
@@ -66,7 +59,6 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/applications': typeof ApplicationsRoute
   '/inbox': typeof InboxRoute
-  '/logs': typeof LogsRoute
   '/rules': typeof RulesRoute
   '/screen': typeof ScreenRoute
   '/settings': typeof SettingsRoute
@@ -76,7 +68,6 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/applications': typeof ApplicationsRoute
   '/inbox': typeof InboxRoute
-  '/logs': typeof LogsRoute
   '/rules': typeof RulesRoute
   '/screen': typeof ScreenRoute
   '/settings': typeof SettingsRoute
@@ -87,25 +78,16 @@ export interface FileRouteTypes {
     | '/'
     | '/applications'
     | '/inbox'
-    | '/logs'
     | '/rules'
     | '/screen'
     | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/applications'
-    | '/inbox'
-    | '/logs'
-    | '/rules'
-    | '/screen'
-    | '/settings'
+  to: '/' | '/applications' | '/inbox' | '/rules' | '/screen' | '/settings'
   id:
     | '__root__'
     | '/'
     | '/applications'
     | '/inbox'
-    | '/logs'
     | '/rules'
     | '/screen'
     | '/settings'
@@ -115,7 +97,6 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApplicationsRoute: typeof ApplicationsRoute
   InboxRoute: typeof InboxRoute
-  LogsRoute: typeof LogsRoute
   RulesRoute: typeof RulesRoute
   ScreenRoute: typeof ScreenRoute
   SettingsRoute: typeof SettingsRoute
@@ -142,13 +123,6 @@ declare module '@tanstack/react-router' {
       path: '/rules'
       fullPath: '/rules'
       preLoaderRoute: typeof RulesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/logs': {
-      id: '/logs'
-      path: '/logs'
-      fullPath: '/logs'
-      preLoaderRoute: typeof LogsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inbox': {
@@ -179,7 +153,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApplicationsRoute: ApplicationsRoute,
   InboxRoute: InboxRoute,
-  LogsRoute: LogsRoute,
   RulesRoute: RulesRoute,
   ScreenRoute: ScreenRoute,
   SettingsRoute: SettingsRoute,

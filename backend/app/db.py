@@ -33,24 +33,6 @@ def init_db() -> None:
     import app.models  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
-    _migrate_add_columns()
-
-
-def _migrate_add_columns() -> None:
-    """幂等地补全 schema 缺失列（ALTER TABLE IF NOT EXISTS 的 SQLite 替代方案）。
-
-    SQLite 不支持 IF NOT EXISTS on ALTER COLUMN，所以先查 PRAGMA，缺了再 ALTER。
-    """
-    with engine.connect() as conn:
-        # quota.vlm_count（M5 VLM 熔断计数）
-        cols = {row[1] for row in conn.execute(
-            __import__("sqlalchemy").text("PRAGMA table_info(quota)")
-        )}
-        if "vlm_count" not in cols:
-            conn.execute(__import__("sqlalchemy").text(
-                "ALTER TABLE quota ADD COLUMN vlm_count INTEGER NOT NULL DEFAULT 0"
-            ))
-            conn.commit()
 
 
 @contextmanager
