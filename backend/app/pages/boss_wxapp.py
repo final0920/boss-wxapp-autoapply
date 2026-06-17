@@ -375,16 +375,37 @@ class BossWxappDriver:
     def _on_list(self) -> bool:
         return not self._on_chat() and not self._on_detail() and len(self.scrape_page()) >= 1
 
-    def ensure_on_list(self) -> bool:
-        if self._on_list():
-            return True
-        # 退出会话/详情，再切到「职位」tab
-        for _ in range(3):
-            if not self._on_chat() and not self._on_detail():
-                break
-            self._press_back()
-            time.sleep(1.0)
-        return self.goto_list()
+    def fg_page(self) -> str:
+        """前台页型分类（只看可见在屏帧）：chat|detail|msglist|feed|list|unknown。"""
+        try:
+            return self._eval(_JS_FG_PAGE) or "unknown"
+        except Exception:  # noqa: BLE001
+            return "unknown"
+
+    def ensure_on_list(self, max_try: int = 5) -> bool:
+        """回到「职位」推荐列表锚点。
+
+        以页型分类(fg_page)为准、而非 scrape 卡数——曾因列表已在屏但本帧 scrape
+        暂为 0 就判定"未回到锚点"，导致明明停在列表却空转重试。失败时打印当前
+        页型+卡数，便于定位到底卡在哪一页。
+        """
+        for _ in range(max_try):
+            pg = self.fg_page()
+            if pg == "list" or self._on_list():
+                return True
+            if pg in ("chat", "detail", "msglist"):
+                # 先退出会话/详情/消息列表，下一轮再切 tab
+                self._press_back()
+                time.sleep(1.0)
+                continue
+            # feed / unknown：切到底部「职位」tab
+            self.goto_list()
+            if self.fg_page() == "list" or self._on_list():
+                return True
+            time.sleep(0.8)
+        logger.warning("ensure_on_list 未回到列表：页型=%s scrape=%d",
+                       self.fg_page(), len(self.scrape_page()))
+        return False
 
     def goto_list(self) -> bool:
         """导航到底部「职位」tab（职位推荐列表）。"""
