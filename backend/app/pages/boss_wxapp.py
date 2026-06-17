@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 _SAL = re.compile(r"\d+\s*[-~]\s*\d+\s*[Kk]")
 _EXP = re.compile(r"\d+-?\d*年(以上|以内)?|经验不限|应届|在校")
 _DEGREE = ("学历不限", "初中及以下", "中专", "中技", "高中", "大专", "本科", "硕士", "博士")
-_VERIFY_KW = ("验证码", "拖动", "滑块", "请完成", "安全验证", "向右滑", "点击验证", "拼图", "人机")
+# 仅保留滑块/拼图类验证页特有文案；剔除"请完成"(如"请完成在线简历")、"人机" 等
+# 正常 UI 也会出现的泛词，避免误判。检测口径见 detect_verify（只扫可见在屏帧）。
+_VERIFY_KW = ("拖动", "滑块", "向右滑", "拼图", "安全验证", "点击验证", "验证码")
 
 
 @dataclass
@@ -177,11 +179,25 @@ class BossWxappDriver:
             return None
 
     def detect_verify(self) -> bool:
+        """风控/验证页检测。
+
+        只扫 **visibility:visible 且在屏** 的 iframe（与页面判定 _vis_has 同口径）——
+        旧实现扫了根文档 + 所有 iframe（含后台残留帧），叠加泛关键词导致界面正常时
+        仍常驻误判。命中即记录具体关键词，便于复盘是哪个词/页触发。
+        """
+        kw = json.dumps(_VERIFY_KW, ensure_ascii=False)
+        js = (r"""(function(){var KW=%s;var f=document.querySelectorAll('iframe');
+          for(var i=0;i<f.length;i++){var e=f[i];var cs=getComputedStyle(e);
+            if(cs.visibility!=='visible'||cs.display==='none')continue;
+            var r=e.getBoundingClientRect();if(r.width<200||r.height<300||r.left<-60||r.left>60)continue;
+            try{var d=e.contentDocument;var t=d&&d.body?d.body.innerText:'';
+              for(var j=0;j<KW.length;j++){if(t.indexOf(KW[j])>=0)return KW[j];}}catch(x){}}
+          return '';})()""" % kw)
         try:
-            txt = self._eval("(function(){var t=document.body?document.body.innerText:'';"
-                             "var f=document.querySelectorAll('iframe');for(var i=0;i<f.length;i++){"
-                             "try{var d=f[i].contentDocument;if(d&&d.body)t+=' '+d.body.innerText;}catch(e){}}return t;})()")
-            return any(k in (txt or "") for k in _VERIFY_KW)
+            hit = self._eval(js)
+            if hit:
+                logger.warning("detect_verify 命中风控关键词: %s", hit)
+            return bool(hit)
         except Exception:  # noqa: BLE001
             return False
 
